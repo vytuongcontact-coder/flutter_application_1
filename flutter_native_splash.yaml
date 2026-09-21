@@ -1,0 +1,17 @@
+flutter_native_splash:
+  # Native Android <= 11 stretches the background; Flutter uses BoxFit.cover.
+  background_image: assets/images/nso-splash-landscape-1499x999.png
+  background_image_dark: assets/images/nso-splash-landscape-1499x999.png
+  image_ios: assets/images/nso-splash-landscape-1499x999.png
+  image_dark_ios: assets/images/nso-splash-landscape-1499x999.png
+  ios_content_mode: scaleAspectFill
+  android: true
+  ios: true
+  web: true
+  fullscreen: false
+  android_12:
+    # Android 12+ supports a solid background and a masked central image only.
+    color: "#005A68"
+    color_dark: "#005A68"
+    image: assets/images/nso-splash-landscape-1499x999.png
+    image_dark: assets/images/nso-splash-landscape-1499x999.png
