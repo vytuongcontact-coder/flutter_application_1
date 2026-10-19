@@ -10,7 +10,11 @@
 - Drawer có logo, icon Font Awesome và 11 mục; Thời khóa biểu và Lịch thi là hai mục riêng.
 - Thanh điều hướng dưới gồm Trang chủ, Thông báo, Điểm danh, Tài khoản.
 
-Trang chủ và Tin tức UEH đã mở được website. Các mục khác đang chờ liên kết hoặc triển khai màn hình; khi chọn sẽ hiển thị thông báo chưa khả dụng.
+Trang chủ và Tin tức UEH đã mở được website. Tab Tài khoản hỗ trợ đăng nhập MSSV,
+khôi phục phiên, thẻ sinh viên từ API và đăng xuất. Điểm danh hỗ trợ nhập/quét mã,
+lấy vị trí khi đợt yêu cầu và gửi API. Các mục chưa có API vẫn báo chưa khả dụng.
+
+Hướng dẫn theo từng bước, luồng token và phạm vi API: [API_INTEGRATION.md](docs/API_INTEGRATION.md).
 
 ## Cấu trúc mã nguồn
 

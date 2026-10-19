@@ -1,29 +1,44 @@
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
-enum DrawerMenu {
-  news('Tin tức UEH', FontAwesomeIcons.newspaper),
-  events('Sự kiện UEH', FontAwesomeIcons.calendarDays),
-  grades('Xem điểm', FontAwesomeIcons.graduationCap),
-  faceIdentification('Định danh khuôn mặt', FontAwesomeIcons.idBadge),
-  schedule('Thời khóa biểu', FontAwesomeIcons.calendarWeek),
-  examSchedule('Lịch thi', FontAwesomeIcons.filePen),
-  healthCare('Chăm sóc sức khỏe', FontAwesomeIcons.heartPulse),
-  greenStation('UEH Go Green Station', FontAwesomeIcons.leaf),
-  contact('Liên hệ trực tiếp UEH', FontAwesomeIcons.headset),
-  greenCoin('UEH Green Coin', FontAwesomeIcons.coins),
-  attendance('Đã điểm danh', FontAwesomeIcons.clipboardCheck);
+import '../helpers/DBUtils.dart';
 
-  const DrawerMenu(this.title, this.icon);
+class AppDrawer extends StatefulWidget {
+  const AppDrawer({
+    super.key,
+    required this.onSelected,
+    this.loadMenus = DBUtils.getMenus,
+  });
 
-  final String title;
-  final FaIconData icon;
+  final ValueChanged<MenuNav> onSelected;
+  final Future<List<MenuNav>> Function() loadMenus;
+
+  @override
+  State<AppDrawer> createState() => _AppDrawerState();
 }
 
-class AppDrawer extends StatelessWidget {
-  const AppDrawer({super.key, required this.onSelected});
+class _AppDrawerState extends State<AppDrawer> {
+  late Future<List<MenuNav>> _menus;
 
-  final ValueChanged<DrawerMenu> onSelected;
+  static const _icons = {
+    'newspaper': FontAwesomeIcons.newspaper,
+    'calendarDays': FontAwesomeIcons.calendarDays,
+    'graduationCap': FontAwesomeIcons.graduationCap,
+    'idBadge': FontAwesomeIcons.idBadge,
+    'calendarWeek': FontAwesomeIcons.calendarWeek,
+    'filePen': FontAwesomeIcons.filePen,
+    'heartPulse': FontAwesomeIcons.heartPulse,
+    'leaf': FontAwesomeIcons.leaf,
+    'headset': FontAwesomeIcons.headset,
+    'coins': FontAwesomeIcons.coins,
+    'clipboardCheck': FontAwesomeIcons.clipboardCheck,
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    _menus = widget.loadMenus();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,32 +62,69 @@ class AppDrawer extends StatelessWidget {
                 ),
               ),
             ),
-            for (final menu in DrawerMenu.values)
-              ListTile(
-                tileColor: Colors.white,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 4,
-                ),
-                leading: SizedBox(
-                  width: 28,
-                  child: Center(
-                    child: FaIcon(
-                      menu.icon,
-                      size: 22,
-                      color: const Color(0xFF005A68),
+            FutureBuilder<List<MenuNav>>(
+              future: _menus,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: CircularProgressIndicator(),
                     ),
-                  ),
-                ),
-                title: Text(
-                  menu.title,
-                  style: const TextStyle(color: Colors.black87, fontSize: 16),
-                ),
-                onTap: () {
-                  Scaffold.of(context).closeDrawer();
-                  onSelected(menu);
-                },
-              ),
+                  );
+                }
+                if (snapshot.hasError) {
+                  return Column(
+                    children: [
+                      const Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Text('Không thể tải menu. Vui lòng thử lại.'),
+                      ),
+                      TextButton(
+                        onPressed: () => setState(() {
+                          _menus = widget.loadMenus();
+                        }),
+                        child: const Text('Thử lại'),
+                      ),
+                    ],
+                  );
+                }
+                return Column(
+                  children: [
+                    for (final menu in snapshot.data!)
+                      ListTile(
+                        tileColor: Colors.white,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 4,
+                        ),
+                        leading: SizedBox(
+                          width: 28,
+                          child: Center(
+                            child: FaIcon(
+                              _icons[menu.iconName] ??
+                                  FontAwesomeIcons.circleQuestion,
+                              size: 22,
+                              color: const Color(0xFF005A68),
+                            ),
+                          ),
+                        ),
+                        title: Text(
+                          menu.menuName,
+                          style: const TextStyle(
+                            color: Colors.black87,
+                            fontSize: 16,
+                          ),
+                        ),
+                        onTap: () {
+                          Scaffold.of(context).closeDrawer();
+                          widget.onSelected(menu);
+                        },
+                      ),
+                  ],
+                );
+              },
+            ),
           ],
         ),
       ),

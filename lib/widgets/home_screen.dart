@@ -1,31 +1,377 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:html/dom.dart' as dom;
+import 'package:html/parser.dart' as html;
+import 'package:http/http.dart' as http;
 import 'package:webview_flutter/webview_flutter.dart';
 
+import '../helpers/DBUtils.dart';
+import '../controllers/auth_controller.dart';
+import 'login_screen.dart';
 import 'app_drawer.dart';
 import 'app_bottom_bar.dart';
 import 'app_top_bar.dart';
+import 'attendance_screen.dart';
+import 'account_screen.dart';
+
+const _newsOrange = Color(0xFFFF6F00);
+
+// Các phần tin tức đặt trong file hiện có theo phạm vi được duyệt.
+class NewsArticle {
+  const NewsArticle({
+    required this.title,
+    required this.url,
+    required this.category,
+    this.imageUrl,
+  });
+
+  final String title;
+  final Uri url;
+  final String category;
+  final Uri? imageUrl;
+}
+
+class NewsFeed {
+  const NewsFeed({
+    required this.title,
+    required this.subtitle,
+    required this.articles,
+  });
+
+  final String title;
+  final String subtitle;
+  final List<NewsArticle> articles;
+}
+
+class NewsService {
+  NewsService({http.Client? client}) : _client = client ?? http.Client();
+
+  final http.Client _client;
+
+  void close() => _client.close();
+
+  static String _text(String value) =>
+      value.replaceAll(RegExp(r'\s+'), ' ').trim();
+
+  static Uri? _resolve(Uri base, String? value) {
+    if (value == null || value.trim().isEmpty) return null;
+    final uri = base.resolve(value.trim());
+    return uri.hasAuthority && (uri.scheme == 'https' || uri.scheme == 'http')
+        ? uri
+        : null;
+  }
+
+  Future<dom.Document> _fetch(Uri uri) async {
+    if (_resolve(uri, uri.toString()) == null) {
+      throw const FormatException('URL tin tức không hợp lệ.');
+    }
+    final response = await _client
+        .get(uri)
+        .timeout(const Duration(seconds: 25));
+    if (response.statusCode != 200) {
+      throw http.ClientException(
+        'Không thể tải tin (${response.statusCode}).',
+        uri,
+      );
+    }
+    return html.parse(utf8.decode(response.bodyBytes, allowMalformed: true));
+  }
+
+  Future<NewsFeed> fetchFeed(Uri uri) async {
+    final document = await _fetch(uri);
+    final articles = <NewsArticle>[];
+    final seen = <Uri>{};
+    for (final item in document.querySelectorAll('.grid-container article')) {
+      final category = item.querySelector('.news-title-view');
+      final link =
+          item.querySelector('.content h3:last-child a') ??
+          item.querySelector('p a[href]');
+      final url = _resolve(uri, link?.attributes['href']);
+      final title = _text(link?.text ?? '');
+      if (url == null || title.isEmpty || !seen.add(url)) continue;
+      articles.add(
+        NewsArticle(
+          title: title,
+          url: url,
+          category: _text(category?.text ?? 'Tin tức UEH'),
+          imageUrl: _resolve(uri, item.querySelector('img')?.attributes['src']),
+        ),
+      );
+    }
+    if (articles.isEmpty) {
+      throw const FormatException('Không tìm thấy danh sách tin UEH.');
+    }
+    return NewsFeed(
+      title: _text(
+        document.querySelector('.ueh-block-title')?.text ?? 'Tin tức',
+      ),
+      subtitle: _text(
+        document.querySelector('section > header > p')?.text ?? '',
+      ),
+      articles: articles,
+    );
+  }
+}
+
+class NewsListContent extends StatefulWidget {
+  const NewsListContent({
+    super.key,
+    required this.uri,
+    required this.service,
+    required this.onSelected,
+  });
+
+  final Uri uri;
+  final NewsService service;
+  final ValueChanged<NewsArticle> onSelected;
+
+  @override
+  State<NewsListContent> createState() => _NewsListContentState();
+}
+
+class _NewsListContentState extends State<NewsListContent> {
+  late Future<NewsFeed> _feed;
+
+  @override
+  void initState() {
+    super.initState();
+    _feed = widget.service.fetchFeed(widget.uri);
+  }
+
+  Future<void> _reload() async {
+    final future = widget.service.fetchFeed(widget.uri);
+    setState(() => _feed = future);
+    try {
+      await future;
+    } catch (_) {
+      /* FutureBuilder hiển thị lỗi. */
+    }
+  }
+
+  Widget _card({required Widget child, required NewsArticle article}) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 20),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Color(0x26000000),
+            blurRadius: 8,
+            offset: Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(onTap: () => widget.onSelected(article), child: child),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => Container(
+    color: Colors.white,
+    child: FutureBuilder<NewsFeed>(
+      future: _feed,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return _NewsLoadError(onRetry: _reload);
+        }
+        final feed = snapshot.data!;
+        final featured = feed.articles.first;
+        return RefreshIndicator(
+          onRefresh: _reload,
+          child: SingleChildScrollView(
+            key: const PageStorageKey('ueh-news-list'),
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(22, 20, 22, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  feed.title,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: _newsOrange,
+                    fontSize: 30,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  feed.subtitle,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xFF999999),
+                    fontSize: 15,
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                _card(
+                  article: featured,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) => Stack(
+                      children: [
+                        AspectRatio(
+                          aspectRatio: 2.5,
+                          child: featured.imageUrl == null
+                              ? const ColoredBox(
+                                  color: Color(0xFFF4F4F4),
+                                  child: Icon(
+                                    Icons.image_outlined,
+                                    color: AppTopBar.uehBlue,
+                                  ),
+                                )
+                              : Image.network(
+                                  featured.imageUrl.toString(),
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, error, stackTrace) =>
+                                      const Center(
+                                        child: Icon(
+                                          Icons.image_outlined,
+                                          color: AppTopBar.uehBlue,
+                                        ),
+                                      ),
+                                ),
+                        ),
+                        Padding(
+                          padding: EdgeInsets.only(
+                            top: constraints.maxWidth / 2.5,
+                          ),
+                          child: Container(
+                            width: double.infinity,
+                            color: AppTopBar.uehBlue,
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 18),
+                            child: Column(
+                              children: [
+                                const Text(
+                                  'TIN TỨC NỔI BẬT',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 25,
+                                    height: 1.4,
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                Text(
+                                  featured.title,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 20,
+                                    height: 1.45,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                for (final article in feed.articles.skip(1))
+                  _card(
+                    article: article,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            article.category.toUpperCase(),
+                            style: const TextStyle(
+                              color: _newsOrange,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              height: 1.4,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            article.title,
+                            textAlign: TextAlign.justify,
+                            style: const TextStyle(
+                              color: Colors.black,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 19,
+                              height: 1.3,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    ),
+  );
+}
+
+class _NewsLoadError extends StatelessWidget {
+  const _NewsLoadError({required this.onRetry});
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.wifi_off, color: AppTopBar.uehBlue, size: 32),
+          const SizedBox(height: 12),
+          const Text(
+            'Không thể tải tin tức. Vui lòng thử lại.',
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 12),
+          FilledButton(onPressed: onRetry, child: const Text('Thử lại')),
+        ],
+      ),
+    ),
+  );
+}
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({super.key, this.auth});
+
+  final AuthController? auth;
 
   // Đổi URL tại đây hoặc dùng flutter run --dart-define=UEH_URL=https://...
-  static const websiteUrl = String.fromEnvironment(
-    'UEH_URL',
-    defaultValue: 'https://ueh.edu.vn/tintucmobile',
-  );
+  static const websiteUrl = DBUtils.newsUrl;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  late final AuthController _auth;
+  BottomMenu? _afterLogin;
+  bool _wasLoggedIn = false;
   WebViewController? _controller;
   int _progress = 0;
   bool _canGoBack = false;
   String? _error;
   String _pageTitle = BottomMenu.home.title;
+  BottomMenu _selectedMenu = BottomMenu.home;
+  final _newsService = NewsService();
+  Uri? _newsUri;
+  NewsArticle? _article;
+  int _newsRevision = 0;
+  bool _handlingNewsBack = false;
 
   bool get _supportsWebView =>
       !kIsWeb &&
@@ -36,6 +382,10 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _auth = widget.auth ?? AuthController();
+    _wasLoggedIn = _auth.isLoggedIn;
+    _auth.addListener(_onAuthChanged);
+    if (_auth.initializing) _auth.initialize();
     if (!_supportsWebView) return;
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
@@ -73,30 +423,86 @@ class _HomeScreenState extends State<HomeScreen> {
     _openHome();
   }
 
-  void _onMenuSelected(DrawerMenu menu) {
-    if (menu == DrawerMenu.news && _controller != null) {
-      setState(() => _pageTitle = menu.title);
-      _openHome();
+  void _onAuthChanged() {
+    if (!mounted) return;
+    setState(() {
+      if (_wasLoggedIn && !_auth.isLoggedIn) {
+        _selectedMenu = BottomMenu.account;
+        _afterLogin = null;
+      } else if (!_wasLoggedIn && _auth.isLoggedIn && _afterLogin != null) {
+        _selectedMenu = _afterLogin!;
+        _afterLogin = null;
+      }
+      _wasLoggedIn = _auth.isLoggedIn;
+    });
+  }
+
+  void _onMenuSelected(MenuNav menu) {
+    final uri = Uri.tryParse(menu.menuUrl);
+    final hasUrl =
+        uri != null &&
+        uri.hasAuthority &&
+        (uri.scheme == 'https' || uri.scheme == 'http');
+    if (hasUrl &&
+        (menu.iconName == 'newspaper' ||
+            uri.path == Uri.parse(HomeScreen.websiteUrl).path)) {
+      setState(() {
+        _selectedMenu = BottomMenu.home;
+        _pageTitle = menu.menuName;
+        _newsUri = uri;
+        _article = null;
+      });
+      return;
+    }
+    if (hasUrl && _controller != null) {
+      setState(() {
+        _selectedMenu = BottomMenu.home;
+        _pageTitle = menu.menuName;
+        _newsUri = null;
+        _article = null;
+      });
+      _load(() => _controller!.loadRequest(uri));
       return;
     }
 
-    // Gắn URL hoặc route của các chức năng còn lại tại đây.
+    // Những chức năng chưa có URL vẫn hiển thị thông báo như trước.
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
           content: Text(
-            menu == DrawerMenu.news
-                ? 'Vui lòng mở ứng dụng trên Android, iOS hoặc macOS để xem tin tức.'
-                : '${menu.title}: chức năng hiện chưa khả dụng.',
+            hasUrl
+                ? 'Vui lòng mở ứng dụng trên Android, iOS hoặc macOS để xem nội dung.'
+                : '${menu.menuName}: chức năng hiện chưa khả dụng.',
           ),
         ),
       );
   }
 
   void _onBottomMenuSelected(BottomMenu menu) {
+    if (menu == BottomMenu.attendance || menu == BottomMenu.account) {
+      FocusScope.of(context).unfocus();
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      setState(() {
+        if (menu == BottomMenu.attendance && !_auth.isLoggedIn) {
+          _afterLogin = menu;
+          _selectedMenu = BottomMenu.account;
+        } else {
+          _afterLogin = null;
+          _selectedMenu = menu;
+        }
+      });
+      return;
+    }
     if (menu == BottomMenu.home) {
-      setState(() => _pageTitle = menu.title);
+      FocusScope.of(context).unfocus();
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      setState(() {
+        _selectedMenu = menu;
+        _pageTitle = menu.title;
+        _newsUri = null;
+        _article = null;
+      });
       if (_controller != null) _openHome();
       return;
     }
@@ -145,20 +551,73 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  void _backFromNews() {
+    // Một thao tác Back chỉ thay đổi một cấp, kể cả khi nền tảng báo lại
+    // callback trước khi frame điều hướng mới được dựng.
+    if (_handlingNewsBack) return;
+    _handlingNewsBack = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _handlingNewsBack = false;
+    });
+    if (_article != null) {
+      setState(() => _article = null);
+    } else {
+      _onBottomMenuSelected(BottomMenu.home);
+    }
+  }
+
+  void _openNewsArticle(NewsArticle article) {
+    final controller = _controller;
+    if (controller == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Vui lòng mở ứng dụng trên Android, iOS hoặc macOS để xem nội dung.',
+          ),
+        ),
+      );
+      return;
+    }
+    setState(() => _article = article);
+    // Dùng chính WebView của Trang chủ để giữ HTML, CSS và redirect của website.
+    _load(() => controller.loadRequest(article.url));
+  }
+
+  Future<void> _retryWebPage() => _article == null
+      ? _openHome()
+      : _load(() => _controller!.loadRequest(_article!.url));
+
+  @override
+  void dispose() {
+    _auth.removeListener(_onAuthChanged);
+    if (widget.auth == null) _auth.dispose();
+    _newsService.close();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = _controller;
+    final isAttendance = _selectedMenu == BottomMenu.attendance;
+    final isAccount = _selectedMenu == BottomMenu.account;
+    final isStudentScreen = isAttendance || isAccount;
     return PopScope(
-      canPop: !_canGoBack,
+      canPop: !isStudentScreen && _newsUri == null && !_canGoBack,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop && _canGoBack && controller != null) {
+        if (didPop) return;
+        if (isStudentScreen) {
+          _onBottomMenuSelected(BottomMenu.home);
+        } else if (_newsUri != null) {
+          _backFromNews();
+        } else if (_canGoBack && controller != null) {
           _load(controller.goBack);
         }
       },
       child: Scaffold(
         drawer: AppDrawer(onSelected: _onMenuSelected),
         appBar: AppTopBar(
-          title: _pageTitle,
+          title: isStudentScreen ? _selectedMenu.title : _pageTitle,
+          centerTitle: isStudentScreen ? true : null,
           leading: Builder(
             builder: (context) => IconButton(
               tooltip: 'Mở menu',
@@ -166,70 +625,135 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: () => Scaffold.of(context).openDrawer(),
             ),
           ),
-          actions: [
-            IconButton(
-              tooltip: 'Tải lại',
-              onPressed: controller == null
-                  ? null
-                  : () => _load(controller.reload),
-              icon: const FaIcon(FontAwesomeIcons.rotateRight, size: 20),
-            ),
-          ],
+          actions: isAccount && _auth.isLoggedIn
+              ? [
+                  IconButton(
+                    tooltip: 'Đăng xuất',
+                    icon: const Icon(Icons.logout, size: 26),
+                    onPressed: _auth.busy ? null : _auth.logout,
+                  ),
+                ]
+              : isAttendance || isAccount
+              ? []
+              : [
+                  IconButton(
+                    tooltip: 'Tải lại',
+                    onPressed: _newsUri != null && _article == null
+                        ? () => setState(() => _newsRevision++)
+                        : controller == null
+                        ? null
+                        : () => _load(controller.reload),
+                    icon: const FaIcon(FontAwesomeIcons.rotateRight, size: 20),
+                  ),
+                ],
         ),
         body: SafeArea(
-          child: controller == null
-              ? const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Text(
-                      'Vui lòng chạy ứng dụng trên Android, iOS hoặc macOS để xem website.',
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                )
-              : Stack(
+          child: isAttendance
+              ? AttendanceScreen(api: _auth.api)
+              : isAccount
+              ? _buildAccount()
+              : _newsUri != null
+              ? IndexedStack(
+                  index: _article == null ? 0 : 1,
                   children: [
-                    Positioned.fill(
-                      child: WebViewWidget(controller: controller),
+                    NewsListContent(
+                      key: ValueKey('$_newsUri/$_newsRevision'),
+                      uri: _newsUri!,
+                      service: _newsService,
+                      onSelected: _openNewsArticle,
                     ),
-                    if (_error != null)
-                      Positioned.fill(
-                        child: ColoredBox(
-                          color: Theme.of(context).colorScheme.surface,
-                          child: Center(
-                            child: Padding(
-                              padding: const EdgeInsets.all(24),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const FaIcon(
-                                    FontAwesomeIcons.triangleExclamation,
-                                    size: 36,
-                                  ),
-                                  const SizedBox(height: 16),
-                                  Text(_error!, textAlign: TextAlign.center),
-                                  const SizedBox(height: 16),
-                                  FilledButton.icon(
-                                    onPressed: _openHome,
-                                    icon: const FaIcon(
-                                      FontAwesomeIcons.rotateRight,
-                                      size: 16,
-                                    ),
-                                    label: const Text('Thử lại'),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    if (_progress < 100 && _error == null)
-                      LinearProgressIndicator(value: _progress / 100),
+                    if (_article != null) _buildWebContent(controller),
                   ],
-                ),
+                )
+              : _buildWebContent(controller),
         ),
-        bottomNavigationBar: AppBottomBar(onSelected: _onBottomMenuSelected),
+        bottomNavigationBar: AppBottomBar(
+          selectedMenu: _selectedMenu,
+          onSelected: _onBottomMenuSelected,
+        ),
       ),
     );
   }
+
+  Widget _buildAccount() {
+    if (_auth.initializing) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (!_auth.isLoggedIn) return LoginScreen(auth: _auth);
+    if (_auth.profile == null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_auth.busy)
+                const CircularProgressIndicator()
+              else ...[
+                Text(
+                  _auth.error ?? 'Chưa tải được thông tin sinh viên.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: _auth.reloadProfile,
+                  child: const Text('Thử lại'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
+    return AccountScreen(profile: _auth.profile!);
+  }
+
+  Widget _buildWebContent(WebViewController? controller) => controller == null
+      ? const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'Vui lòng chạy ứng dụng trên Android, iOS hoặc macOS để xem website.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        )
+      : Stack(
+          children: [
+            Positioned.fill(child: WebViewWidget(controller: controller)),
+            if (_error != null)
+              Positioned.fill(
+                child: ColoredBox(
+                  color: Theme.of(context).colorScheme.surface,
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const FaIcon(
+                            FontAwesomeIcons.triangleExclamation,
+                            size: 36,
+                          ),
+                          const SizedBox(height: 16),
+                          Text(_error!, textAlign: TextAlign.center),
+                          const SizedBox(height: 16),
+                          FilledButton.icon(
+                            onPressed: _retryWebPage,
+                            icon: const FaIcon(
+                              FontAwesomeIcons.rotateRight,
+                              size: 16,
+                            ),
+                            label: const Text('Thử lại'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            if (_progress < 100 && _error == null)
+              LinearProgressIndicator(value: _progress / 100),
+          ],
+        );
 }
