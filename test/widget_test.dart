@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
@@ -11,12 +12,21 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_platform_interface/webview_flutter_platform_interface.dart';
 
 import 'package:flutter_application_1/main.dart';
+import 'package:flutter_application_1/controllers/auth_controller.dart';
+import 'package:flutter_application_1/controllers/menu_sync_controller.dart';
 import 'package:flutter_application_1/helpers/DBUtils.dart';
+import 'package:flutter_application_1/services/student_api.dart';
+import 'package:flutter_application_1/widgets/account_screen.dart';
+import 'package:flutter_application_1/widgets/attendance_screen.dart';
 import 'package:flutter_application_1/widgets/app_bottom_bar.dart';
 import 'package:flutter_application_1/widgets/app_drawer.dart';
 import 'package:flutter_application_1/widgets/app_top_bar.dart';
 import 'package:flutter_application_1/widgets/home_screen.dart';
 import 'package:flutter_application_1/widgets/splash_screen.dart';
+
+import 'menu_fixtures.dart';
+import 'student_api_test.dart'
+    show MemoryTokenStore, jsonResponse, tokens, profileJson;
 
 // Chỉ dùng khi chủ động bật UEH_LIVE_TEST; widget test mặc định chặn HTTP thật.
 class _LiveHttpOverrides extends HttpOverrides {}
@@ -286,19 +296,329 @@ void main() {
     await tester.pump(SplashScreen.displayDuration);
     expect(tester.takeException(), isNull);
   });
+
+  group('Back khi Drawer đang mở (Android, predictive back)', () {
+    final android = TargetPlatformVariant({TargetPlatform.android});
+    late _FakeWebViewPlatform platform;
+    late List<Object?> frameworkHandlesBack; // tín hiệu Flutter gửi Android
+    late int exitRequests; // số lần Flutter yêu cầu thoát app
+
+    setUp(() {
+      final previous = WebViewPlatform.instance;
+      platform = _FakeWebViewPlatform();
+      WebViewPlatform.instance = platform;
+      addTearDown(
+        () => WebViewPlatform.instance = previous ?? _FakeWebViewPlatform(),
+      );
+    });
+
+    // Dựng HomeScreen qua GoRouter như app thật, chỉ thay mạng và SQLite.
+    Future<AuthController> pumpHome(
+      WidgetTester tester, {
+      bool loggedIn = false,
+    }) async {
+      frameworkHandlesBack = [];
+      exitRequests = 0;
+      final messenger = tester.binding.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'SystemNavigator.setFrameworkHandlesBack') {
+          frameworkHandlesBack.add(call.arguments);
+        }
+        if (call.method == 'SystemNavigator.pop') exitRequests++;
+        return null;
+      });
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
+      );
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+
+      final api = StudentApi(
+        store: MemoryTokenStore()
+          ..value = loggedIn ? jsonEncode(tokens()) : null,
+        client: MockClient(
+          (request) async => request.url.path == '/api/menu'
+              ? jsonResponse(menuJson)
+              : jsonResponse(profileJson),
+        ),
+      );
+      final auth = AuthController(api: api);
+      final menu = MenuSyncController(api: api, store: MemoryMenuStore(apiMenus));
+      final router = GoRouter(
+        routes: [
+          GoRoute(
+            path: '/',
+            builder: (_, _) => HomeScreen(auth: auth, menu: menu),
+          ),
+        ],
+      );
+      addTearDown(() {
+        router.dispose();
+        menu.dispose();
+        auth.dispose();
+      });
+      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+      await tester.pumpAndSettle();
+      return auth;
+    }
+
+    bool drawerOpen(WidgetTester tester) =>
+        tester.state<ScaffoldState>(find.byType(Scaffold).first).isDrawerOpen;
+    bool canPop(WidgetTester tester) => tester
+        .widget<PopScope<Object?>>(find.byWidgetPredicate((w) => w is PopScope))
+        .canPop;
+    String title(WidgetTester tester) =>
+        tester.widget<AppTopBar>(find.byType(AppTopBar)).title;
+    void select(WidgetTester tester, BottomMenu menu) =>
+        tester.widget<AppBottomBar>(find.byType(AppBottomBar)).onSelected(menu);
+    Future<void> openDrawer(WidgetTester tester) async {
+      await tester.tap(find.byTooltip('Mở menu'));
+      await tester.pumpAndSettle();
+    }
+
+    // Back của hệ thống: WidgetsBinding → GoRouter.popRoute → Navigator.maybePop.
+    Future<void> back(WidgetTester tester) async {
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+    }
+
+    // Cử chỉ vuốt Back (predictive back) Android gửi qua kênh flutter/backgesture.
+    Future<void> backGesture(WidgetTester tester, String method) async {
+      final args = method == 'startBackGesture'
+          ? <String, Object?>{
+              'touchOffset': <double>[790, 300],
+              'progress': 0.0,
+              'swipeEdge': 1, // cạnh phải
+            }
+          : null;
+      await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+        SystemChannels.backGesture.name,
+        const StandardMethodCodec().encodeMethodCall(MethodCall(method, args)),
+        (_) {},
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('Trang chủ: Back chỉ đóng Drawer; Android được báo Flutter tự xử lý Back', (
+      tester,
+    ) async {
+      await pumpHome(tester);
+      final loads = platform.controller.loads.length;
+      expect(canPop(tester), isTrue);
+
+      await openDrawer(tester);
+      expect(drawerOpen(tester), isTrue);
+      expect(canPop(tester), isFalse);
+      expect(frameworkHandlesBack.last, isTrue);
+
+      await back(tester);
+      expect(drawerOpen(tester), isFalse);
+      expect(exitRequests, 0);
+      expect(title(tester), 'Trang chủ');
+      expect(platform.controller.loads.length, loads); // WebView không tải lại
+      expect(platform.controller.reloads, 0);
+      expect(canPop(tester), isTrue);
+      expect(frameworkHandlesBack.last, isFalse);
+
+      await back(tester); // Drawer đã đóng: giữ hành vi cũ ở Trang chủ
+      expect(exitRequests, 1);
+      expect(tester.takeException(), isNull);
+    }, variant: android);
+
+    testWidgets('Điểm danh: Back lần 1 chỉ đóng Drawer, lần 2 về Trang chủ', (
+      tester,
+    ) async {
+      await pumpHome(tester, loggedIn: true);
+      select(tester, BottomMenu.attendance);
+      await tester.pumpAndSettle();
+      expect(find.byType(AttendanceScreen), findsOneWidget);
+
+      await openDrawer(tester);
+      await back(tester);
+      expect(drawerOpen(tester), isFalse);
+      expect(find.byType(AttendanceScreen), findsOneWidget);
+      expect(title(tester), 'Điểm danh');
+
+      await back(tester);
+      expect(find.byType(AttendanceScreen), findsNothing);
+      expect(title(tester), 'Trang chủ');
+      expect(exitRequests, 0);
+      expect(tester.takeException(), isNull);
+    }, variant: android);
+
+    testWidgets('Tài khoản: Back khi Drawer mở không đăng xuất, không đổi tab', (
+      tester,
+    ) async {
+      final auth = await pumpHome(tester, loggedIn: true);
+      select(tester, BottomMenu.account);
+      await tester.pumpAndSettle();
+      expect(find.byType(AccountScreen), findsOneWidget);
+
+      await openDrawer(tester);
+      await back(tester);
+      expect(drawerOpen(tester), isFalse);
+      expect(find.byType(AccountScreen), findsOneWidget);
+      expect(title(tester), 'Tài khoản');
+      expect(auth.isLoggedIn, isTrue);
+
+      await back(tester);
+      expect(find.byType(AccountScreen), findsNothing);
+      expect(title(tester), 'Trang chủ');
+      expect(auth.isLoggedIn, isTrue);
+      expect(exitRequests, 0);
+    }, variant: android);
+
+    testWidgets('Danh sách tin: Back khi Drawer mở giữ nguyên danh sách', (
+      tester,
+    ) async {
+      await pumpHome(tester);
+      await openDrawer(tester);
+      await tester.tap(find.text('Tin tức UEH'));
+      await tester.pumpAndSettle();
+      expect(drawerOpen(tester), isFalse);
+      expect(find.byType(NewsListContent), findsOneWidget);
+
+      await openDrawer(tester);
+      await back(tester);
+      expect(drawerOpen(tester), isFalse);
+      expect(find.byType(NewsListContent), findsOneWidget);
+      expect(title(tester), 'Tin tức UEH');
+
+      await back(tester);
+      expect(find.byType(NewsListContent), findsNothing);
+      expect(title(tester), 'Trang chủ');
+      expect(exitRequests, 0);
+    }, variant: android);
+
+    testWidgets('WebView có lịch sử: Back khi Drawer mở không gọi goBack', (
+      tester,
+    ) async {
+      platform.hasHistory = true;
+      await pumpHome(tester);
+      expect(canPop(tester), isFalse);
+
+      await openDrawer(tester);
+      await back(tester);
+      expect(drawerOpen(tester), isFalse);
+      expect(platform.controller.goBacks, 0);
+
+      await back(tester);
+      expect(platform.controller.goBacks, 1);
+      expect(exitRequests, 0);
+    }, variant: android);
+
+    testWidgets('Đóng Drawer bằng vùng tối, kéo và chọn menu vẫn đồng bộ trạng thái', (
+      tester,
+    ) async {
+      await pumpHome(tester);
+
+      await openDrawer(tester);
+      await tester.tapAt(const Offset(780, 300)); // vùng tối bên phải Drawer
+      await tester.pumpAndSettle();
+      expect(drawerOpen(tester), isFalse);
+      expect(canPop(tester), isTrue);
+      expect(frameworkHandlesBack.last, isFalse);
+
+      await openDrawer(tester);
+      await tester.fling(find.byType(Drawer), const Offset(-300, 0), 1000);
+      await tester.pumpAndSettle();
+      expect(drawerOpen(tester), isFalse);
+      expect(canPop(tester), isTrue);
+
+      await openDrawer(tester);
+      await tester.tap(find.text('Sự kiện UEH'));
+      await tester.pumpAndSettle();
+      expect(drawerOpen(tester), isFalse);
+      expect(canPop(tester), isTrue);
+      expect(
+        find.text('Sự kiện UEH: chức năng hiện chưa khả dụng.'),
+        findsOneWidget,
+      );
+
+      await back(tester); // không bị kẹt ở trạng thái "Drawer mở"
+      expect(exitRequests, 1);
+      expect(tester.takeException(), isNull);
+    }, variant: android);
+
+    testWidgets('Vuốt Back khi Drawer mở: Drawer tự đóng giữa chừng vẫn không đổi tab', (
+      tester,
+    ) async {
+      await pumpHome(tester, loggedIn: true);
+      select(tester, BottomMenu.account);
+      await tester.pumpAndSettle();
+      await openDrawer(tester);
+
+      await backGesture(tester, 'startBackGesture');
+      // Tái hiện điều quan sát trên Android 17: các chạm đầu của cú vuốt làm
+      // Drawer tự đóng trước khi Back được xác nhận.
+      tester.state<ScaffoldState>(find.byType(Scaffold).first).closeDrawer();
+      await tester.pumpAndSettle();
+      await backGesture(tester, 'commitBackGesture');
+
+      expect(drawerOpen(tester), isFalse);
+      expect(find.byType(AccountScreen), findsOneWidget);
+      expect(title(tester), 'Tài khoản');
+      expect(exitRequests, 0);
+
+      // Trang chủ: vuốt Back khi Drawer mở chỉ đóng Drawer, không thoát app.
+      select(tester, BottomMenu.home);
+      await tester.pumpAndSettle();
+      await openDrawer(tester);
+      await backGesture(tester, 'startBackGesture');
+      await backGesture(tester, 'commitBackGesture');
+      expect(drawerOpen(tester), isFalse);
+      expect(title(tester), 'Trang chủ');
+      expect(exitRequests, 0);
+    }, variant: android);
+
+    testWidgets('Vuốt Back rồi huỷ: Drawer vẫn mở, các lần Back sau vẫn đúng', (
+      tester,
+    ) async {
+      await pumpHome(tester, loggedIn: true);
+      select(tester, BottomMenu.attendance);
+      await tester.pumpAndSettle();
+      await openDrawer(tester);
+
+      await backGesture(tester, 'startBackGesture');
+      await backGesture(tester, 'cancelBackGesture');
+      expect(drawerOpen(tester), isTrue);
+      expect(find.byType(AttendanceScreen), findsOneWidget);
+
+      await back(tester);
+      expect(drawerOpen(tester), isFalse);
+      expect(find.byType(AttendanceScreen), findsOneWidget);
+      await back(tester);
+      expect(title(tester), 'Trang chủ');
+      expect(exitRequests, 0);
+    }, variant: android);
+
+    testWidgets('Vuốt Back khi Drawer đóng: giữ hành vi cũ (Điểm danh → Trang chủ)', (
+      tester,
+    ) async {
+      await pumpHome(tester, loggedIn: true);
+      select(tester, BottomMenu.attendance);
+      await tester.pumpAndSettle();
+
+      await backGesture(tester, 'startBackGesture');
+      await backGesture(tester, 'commitBackGesture');
+      expect(find.byType(AttendanceScreen), findsNothing);
+      expect(title(tester), 'Trang chủ');
+      expect(exitRequests, 0);
+    }, variant: android);
+  });
 }
 
 class _FakeWebViewPlatform extends WebViewPlatform {
   late _FakeWebViewController controller;
   late _FakeNavigationDelegate delegate;
   int createdControllers = 0;
+  bool hasHistory = false;
 
   @override
   PlatformWebViewController createPlatformWebViewController(
     PlatformWebViewControllerCreationParams params,
   ) {
     createdControllers++;
-    return controller = _FakeWebViewController(params);
+    return controller = _FakeWebViewController(params)..hasHistory = hasHistory;
   }
 
   @override
@@ -336,8 +656,18 @@ class _FakeWebViewController extends PlatformWebViewController {
     delegate?.onProgress?.call(100);
   }
 
+  /// Giả lập WebView đã có trang trước trong lịch sử.
+  bool hasHistory = false;
+  int goBacks = 0;
+
   @override
-  Future<bool> canGoBack() async => false;
+  Future<bool> canGoBack() async => hasHistory;
+
+  @override
+  Future<void> goBack() async {
+    goBacks++;
+    delegate?.onProgress?.call(100);
+  }
 
   @override
   Future<void> reload() async {

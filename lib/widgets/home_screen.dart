@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html;
@@ -361,7 +362,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   late final AuthController _auth;
   late final MenuSyncController _menu;
   BottomMenu? _afterLogin;
@@ -377,6 +378,9 @@ class _HomeScreenState extends State<HomeScreen> {
   NewsArticle? _article;
   int _newsRevision = 0;
   bool _handlingNewsBack = false;
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
+  // Cập nhật qua Scaffold.onDrawerChanged (mở/đóng bằng nút, vùng tối, kéo, chọn menu).
+  bool _drawerOpen = false;
 
   bool get _supportsWebView =>
       !kIsWeb &&
@@ -387,6 +391,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _auth = widget.auth ?? AuthController();
     // Menu dùng chung StudentApi (và token) của AuthController.
     _menu = widget.menu ?? MenuSyncController(api: _auth.api);
@@ -599,12 +604,23 @@ class _HomeScreenState extends State<HomeScreen> {
     _load(() => controller.loadRequest(article.url));
   }
 
+  // Cử chỉ vuốt Back (predictive back, Android 16+) bắt đầu khi Drawer đang mở:
+  // HomeScreen giữ cử chỉ này và chỉ đóng Drawer. Các chạm đầu của cú vuốt có
+  // thể lọt vào Drawer làm nó tự đóng trước khi Back được xác nhận; nếu để Back
+  // đi tiếp qua PopScope thì sẽ đổi tab (Tài khoản/Điểm danh → Trang chủ).
+  @override
+  bool handleStartBackGesture(PredictiveBackEvent backEvent) => _drawerOpen;
+
+  @override
+  void handleCommitBackGesture() => _scaffoldKey.currentState?.closeDrawer();
+
   Future<void> _retryWebPage() => _article == null
       ? _openHome()
       : _load(() => _controller!.loadRequest(_article!.url));
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _auth.removeListener(_onAuthChanged);
     if (widget.menu == null) _menu.dispose();
     if (widget.auth == null) _auth.dispose();
@@ -619,9 +635,16 @@ class _HomeScreenState extends State<HomeScreen> {
     final isAccount = _selectedMenu == BottomMenu.account;
     final isStudentScreen = isAttendance || isAccount;
     return PopScope(
-      canPop: !isStudentScreen && _newsUri == null && !_canGoBack,
+      // Drawer mở thì chặn pop: canPop đổi giá trị nên Flutter báo lại cho
+      // Android rằng app tự xử lý Back (predictive back, Android 16+).
+      canPop: !_drawerOpen && !isStudentScreen && _newsUri == null && !_canGoBack,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
+        // Một lần Back khi Drawer mở chỉ đóng Drawer, không đổi tab/tin/WebView.
+        if (_drawerOpen) {
+          _scaffoldKey.currentState?.closeDrawer();
+          return;
+        }
         if (isStudentScreen) {
           _onBottomMenuSelected(BottomMenu.home);
         } else if (_newsUri != null) {
@@ -631,9 +654,11 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       },
       child: Scaffold(
+        key: _scaffoldKey,
         drawer: AppDrawer(menu: _menu, onSelected: _onMenuSelected),
-        // Mở Drawer: thử đồng bộ lại nếu lần trước lỗi hoặc dữ liệu đã cũ.
         onDrawerChanged: (open) {
+          if (open != _drawerOpen) setState(() => _drawerOpen = open);
+          // Mở Drawer: thử đồng bộ lại nếu lần trước lỗi hoặc dữ liệu đã cũ.
           if (open) _menu.syncIfStale();
         },
         appBar: AppTopBar(
