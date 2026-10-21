@@ -5,7 +5,10 @@ import '../services/news_api.dart';
 import '../services/student_api.dart' show ApiException;
 import 'app_top_bar.dart';
 
-const _newsOrange = Color(0xFFFF6F00);
+// Màu lấy theo giao diện UEH Student gốc.
+const _newsOrange = Color(0xFFE5680C);
+const _featuredBlue = Color(0xFF2C656C);
+const _categoryBlue = Color(0xFF11443F);
 
 /// Kết quả đã chọn để hiển thị: 1 tin lớn và tối đa 4 tin nhỏ.
 class FeaturedNews {
@@ -132,24 +135,36 @@ class _FeaturedNewsContentState extends State<FeaturedNewsContent> {
           child: SingleChildScrollView(
             key: const PageStorageKey('ueh-featured-news'),
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            padding: const EdgeInsets.fromLTRB(22, 20, 22, 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Text(
-                  'TIN TỨC NỔI BẬT',
+                  'Tin tức',
+                  textAlign: TextAlign.center,
                   style: TextStyle(
                     color: _newsOrange,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 32,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
+                const Text(
+                  'Thông tin mới nhất và kiến thức hữu ích từ UEH',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Color(0xFF808080),
+                    fontSize: 15,
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 20),
                 FeaturedNewsCard(item: news.main!, onTap: _tap(news.main!)),
                 for (final item in news.others) ...[
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 20),
                   NewsTile(item: item, onTap: _tap(item)),
                 ],
+                const SizedBox(height: 8),
               ],
             ),
           ),
@@ -164,7 +179,8 @@ class _FeaturedNewsContentState extends State<FeaturedNewsContent> {
   }
 }
 
-/// Tin lớn: ảnh nền, tên chuyên mục, tiêu đề, ngày đăng và SDG.
+/// Tin lớn: ảnh phía trên; khối xanh bên dưới gồm "TIN TỨC NỔI BẬT",
+/// hàng icon SDG và tiêu đề, tất cả căn giữa.
 class FeaturedNewsCard extends StatelessWidget {
   const FeaturedNewsCard({super.key, required this.item, this.onTap});
 
@@ -178,7 +194,7 @@ class FeaturedNewsCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         AspectRatio(
-          aspectRatio: 16 / 9,
+          aspectRatio: 2.5,
           // Ảnh nền; thiếu thì dùng ảnh thu nhỏ; thiếu cả hai thì placeholder.
           child: NewsImage(
             url: item.backgroundImg ?? item.thumbnailImg,
@@ -186,26 +202,36 @@ class FeaturedNewsCard extends StatelessWidget {
           ),
         ),
         Container(
-          color: AppTopBar.uehBlue,
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+          color: _featuredBlue,
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _Category(item.categoryName, color: Colors.white70),
-              const SizedBox(height: 6),
+              const Text(
+                'TIN TỨC NỔI BẬT',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 19,
+                  fontWeight: FontWeight.w500,
+                  height: 1.4,
+                ),
+              ),
+              if (item.sdgs.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                SdgIcons(item.sdgs, alignment: WrapAlignment.center),
+              ],
+              const SizedBox(height: 10),
               Text(
                 item.title,
-                maxLines: 4,
+                textAlign: TextAlign.center,
+                maxLines: 5,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 19,
-                  fontWeight: FontWeight.w700,
-                  height: 1.35,
+                  fontSize: 20,
+                  height: 1.45,
                 ),
               ),
-              const SizedBox(height: 10),
-              _DateAndSdgs(item, dateColor: Colors.white70),
             ],
           ),
         ),
@@ -214,7 +240,7 @@ class FeaturedNewsCard extends StatelessWidget {
   );
 }
 
-/// Tin nhỏ: ảnh thu nhỏ bên trái, chữ bên phải.
+/// Tin nhỏ: thẻ trắng xếp dọc gồm tên chuyên mục, hàng icon SDG và tiêu đề.
 class NewsTile extends StatelessWidget {
   const NewsTile({super.key, required this.item, this.onTap});
 
@@ -225,39 +251,33 @@ class NewsTile extends StatelessWidget {
   Widget build(BuildContext context) => _Card(
     onTap: onTap,
     child: Padding(
-      padding: const EdgeInsets.all(10),
-      child: Row(
+      padding: const EdgeInsets.all(16),
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 112,
-            height: 84,
-            child: NewsImage(
-              url: item.thumbnailImg ?? item.backgroundImg,
-              cacheWidth: 336,
+          Text(
+            item.categoryName.toUpperCase(),
+            style: const TextStyle(
+              color: _categoryBlue,
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              height: 1.4,
             ),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _Category(item.categoryName, color: _newsOrange),
-                const SizedBox(height: 4),
-                Text(
-                  item.title,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.black87,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    height: 1.3,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                _DateAndSdgs(item, dateColor: Colors.black54),
-              ],
+          if (item.sdgs.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            SdgIcons(item.sdgs),
+          ],
+          const SizedBox(height: 8),
+          Text(
+            item.title,
+            textAlign: TextAlign.justify,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.black,
+              fontSize: 18,
+              height: 1.35,
             ),
           ),
         ],
@@ -296,13 +316,20 @@ class NewsImage extends StatelessWidget {
 
 /// Hàng icon SDG theo `NewsItem.sdgs`, ảnh lấy từ assets/images/sdg-N.png.
 class SdgIcons extends StatelessWidget {
-  const SdgIcons(this.sdgs, {super.key, this.size = 26});
+  const SdgIcons(
+    this.sdgs, {
+    super.key,
+    this.size = 30,
+    this.alignment = WrapAlignment.start,
+  });
 
   final List<int> sdgs;
   final double size;
+  final WrapAlignment alignment;
 
   @override
   Widget build(BuildContext context) => Wrap(
+    alignment: alignment,
     spacing: 4,
     runSpacing: 4,
     children: [
@@ -319,50 +346,10 @@ class SdgIcons extends StatelessWidget {
   );
 }
 
-class _DateAndSdgs extends StatelessWidget {
-  const _DateAndSdgs(this.item, {required this.dateColor});
-
-  final NewsItem item;
-  final Color dateColor;
-
-  @override
-  Widget build(BuildContext context) {
-    final date = item.postDate;
-    return Wrap(
-      spacing: 10,
-      runSpacing: 6,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        if (date != null)
-          Text(
-            formatNewsDate(date),
-            style: TextStyle(color: dateColor, fontSize: 13),
-          ),
-        if (item.sdgs.isNotEmpty) SdgIcons(item.sdgs),
-      ],
-    );
-  }
-}
-
 /// Ngày đăng dạng dd/mm/yyyy.
 String formatNewsDate(DateTime date) {
   String two(int value) => value.toString().padLeft(2, '0');
   return '${two(date.day)}/${two(date.month)}/${date.year}';
-}
-
-class _Category extends StatelessWidget {
-  const _Category(this.name, {required this.color});
-
-  final String name;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) => Text(
-    name.toUpperCase(),
-    maxLines: 1,
-    overflow: TextOverflow.ellipsis,
-    style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w800),
-  );
 }
 
 class _Card extends StatelessWidget {
@@ -371,14 +358,23 @@ class _Card extends StatelessWidget {
   final Widget child;
   final VoidCallback? onTap;
 
+  // Thẻ góc vuông, đổ bóng nhẹ như giao diện gốc.
   @override
-  Widget build(BuildContext context) => Material(
-    color: Colors.white,
-    elevation: 2,
-    shadowColor: const Color(0x40000000),
-    borderRadius: BorderRadius.circular(8),
-    clipBehavior: Clip.antiAlias,
-    child: onTap == null ? child : InkWell(onTap: onTap, child: child),
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: const BoxDecoration(
+      color: Colors.white,
+      boxShadow: [
+        BoxShadow(
+          color: Color(0x26000000),
+          blurRadius: 8,
+          offset: Offset(0, 3),
+        ),
+      ],
+    ),
+    child: Material(
+      color: Colors.transparent,
+      child: onTap == null ? child : InkWell(onTap: onTap, child: child),
+    ),
   );
 }
 

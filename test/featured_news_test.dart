@@ -237,27 +237,60 @@ void main() {
           for (final sdg in tile.item.sdgs) 'assets/images/sdg-$sdg.png',
         ], reason: 'uid ${tile.item.uid}');
       }
-      expect(find.text('13/10/2026'), findsWidgets); // ngày đăng dd/mm/yyyy
+      // Bố cục theo UEH Student gốc: tiêu đề trang, tin lớn có dòng
+      // "TIN TỨC NỔI BẬT", tin nhỏ không có ảnh và không hiện ngày đăng.
+      expect(find.text('Tin tức'), findsOneWidget);
+      expect(
+        find.text('Thông tin mới nhất và kiến thức hữu ích từ UEH'),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(FeaturedNewsCard),
+          matching: find.text('TIN TỨC NỔI BẬT'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(NewsTile),
+          matching: find.byType(NewsImage),
+        ),
+        findsNothing,
+      );
+      expect(find.text('13/10/2026'), findsNothing);
       expect(tester.takeException(), isNull);
     });
 
     testWidgets(
       'Ảnh null, URL lỗi hoặc tải ảnh thất bại: hiện placeholder, không crash',
       (tester) async {
-        final news = _FakeNews(
-          featured: [
-            _item(40, 219, featured: true, bg: null, thumb: null),
-            _item(41, 220, bg: null, thumb: 'khong-phai-url'),
-            _item(42, 221, bg: 123, thumb: ''),
-            // URL hợp lệ nhưng widget test không có mạng: Image.network báo lỗi.
-            _item(43, 222, bg: null, thumb: 'https://ueh.edu.vn/khong-co.png'),
-          ],
-        );
-        await _pump(tester, news.api);
-        expect(find.byType(FeaturedNewsCard), findsOneWidget);
-        expect(find.byType(NewsTile), findsNWidgets(3));
-        expect(find.byIcon(Icons.image_outlined), findsNWidgets(4));
-        expect(tester.takeException(), isNull);
+        // Tin lớn: lần lượt không có ảnh, URL sai/sai kiểu, và URL hợp lệ nhưng
+        // tải thất bại (widget test không có mạng). Tin nhỏ không hiển thị ảnh.
+        final cases = <(Object?, Object?)>[
+          (null, null),
+          (123, 'khong-phai-url'),
+          (null, 'https://ueh.edu.vn/khong-co.png'),
+        ];
+        for (final (bg, thumb) in cases) {
+          final news = _FakeNews(
+            featured: [
+              _item(40, 219, featured: true, bg: bg, thumb: thumb),
+              _item(41, 220, bg: null, thumb: 'khong-phai-url'),
+              _item(42, 221, bg: 123, thumb: ''),
+              _item(43, 222, bg: null, thumb: null),
+            ],
+          );
+          await tester.pumpWidget(const SizedBox()); // bỏ State của lượt trước
+          await _pump(tester, news.api);
+          final main = tester.widget<FeaturedNewsCard>(
+            find.byType(FeaturedNewsCard),
+          );
+          expect(main.item.backgroundImg, NewsItem.imageUrl(bg));
+          expect(find.byType(NewsTile), findsNWidgets(3));
+          expect(find.byIcon(Icons.image_outlined), findsOneWidget);
+          expect(tester.takeException(), isNull, reason: '$bg / $thumb');
+        }
       },
     );
 

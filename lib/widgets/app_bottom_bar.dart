@@ -23,13 +23,17 @@ class AppBottomBar extends StatelessWidget {
   final ValueChanged<BottomMenu> onSelected;
   final BottomMenu selectedMenu;
 
+  // Tông xanh UEH, cùng màu thanh trên (AppTopBar.uehBlue).
+  static const selectedColor = Color(0xFF005A68);
+  static const unselectedColor = Color(0xFF8DB4BA);
+
   @override
   Widget build(BuildContext context) {
     return BottomNavigationBar(
       type: BottomNavigationBarType.fixed,
       backgroundColor: Colors.white,
-      selectedItemColor: const Color(0xFF005A68),
-      unselectedItemColor: Colors.grey.shade600,
+      selectedItemColor: selectedColor,
+      unselectedItemColor: unselectedColor,
       selectedFontSize: 12,
       unselectedFontSize: 12,
       showUnselectedLabels: true,

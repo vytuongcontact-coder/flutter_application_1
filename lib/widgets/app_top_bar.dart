@@ -14,6 +14,8 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
   final String title;
   final Widget? leading;
   final List<Widget>? actions;
+
+  /// Mặc định căn giữa tiêu đề như giao diện UEH Student gốc.
   final bool? centerTitle;
 
   @override
@@ -22,7 +24,7 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
   @override
   Widget build(BuildContext context) => AppBar(
     title: Text(title),
-    centerTitle: centerTitle,
+    centerTitle: centerTitle ?? true,
     backgroundColor: uehBlue,
     foregroundColor: Colors.white,
     surfaceTintColor: Colors.transparent,

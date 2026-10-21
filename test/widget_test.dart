@@ -222,7 +222,7 @@ void main() {
   });
 
   testWidgets(
-    'Bottom Trang chủ trả về Home hiện có và giữ nguyên màu thanh điều hướng',
+    'Bottom Trang chủ trả về Home hiện có và dùng màu xanh của thanh điều hướng',
     (tester) async {
       await tester.pumpWidget(
         MaterialApp(home: HomeScreen(newsApi: _newsApi())),
@@ -250,7 +250,7 @@ void main() {
         tester
             .widget<BottomNavigationBar>(find.byType(BottomNavigationBar))
             .selectedItemColor,
-        AppTopBar.uehBlue,
+        AppBottomBar.selectedColor,
       );
       tester
           .widget<AppBottomBar>(find.byType(AppBottomBar))
