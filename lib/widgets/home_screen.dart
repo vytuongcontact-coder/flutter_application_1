@@ -16,6 +16,7 @@ import '../models/news.dart';
 import '../services/news_api.dart';
 import 'category_news.dart';
 import 'featured_news.dart';
+import 'news_detail.dart';
 import 'login_screen.dart';
 import 'app_drawer.dart';
 import 'app_bottom_bar.dart';
@@ -390,6 +391,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // Chuyên mục đang mở (danh sách tin lazy load); null là đang ở Trang chủ.
   NewsCategory? _category;
   int _categoryRevision = 0;
+  // Bài đang xem chi tiết; null là đang ở danh sách (Trang chủ hoặc chuyên mục).
+  NewsItem? _article;
+  int _articleRevision = 0;
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   // Cập nhật qua Scaffold.onDrawerChanged (mở/đóng bằng nút, vùng tối, kéo, chọn menu).
   bool _drawerOpen = false;
@@ -489,6 +493,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _pageTitle = menu.menuName;
         _webUri = null;
         _category = null;
+        _article = null;
         _canGoBack = false;
       });
       return;
@@ -500,6 +505,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _pageTitle = menu.menuName;
         _webUri = uri;
         _category = null;
+        _article = null;
         _canGoBack = false;
       });
       _load(() => controller.loadRequest(uri));
@@ -543,6 +549,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _pageTitle = menu.title;
         _webUri = null;
         _category = null;
+        _article = null;
         _canGoBack = false;
       });
       return;
@@ -594,6 +601,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _openCategory(NewsCategory category) =>
       setState(() => _category = category);
 
+  // Chạm một tin ở Trang chủ hoặc chuyên mục: mở trang chi tiết. Màn hình
+  // nguồn vẫn nằm trong IndexedStack nên Back quay về đúng chỗ cũ.
+  void _openArticle(NewsItem item) => setState(() => _article = item);
+
   Future<void> _retryWebPage() => _load(() => _controller!.loadRequest(_webUri!));
 
   @override
@@ -619,7 +630,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           !_drawerOpen &&
           !isStudentScreen &&
           _webUri == null &&
-          _category == null,
+          _category == null &&
+          _article == null,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
         // Một lần Back khi Drawer mở chỉ đóng Drawer, không đổi tab/tin/WebView.
@@ -629,6 +641,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
         if (isStudentScreen) {
           _onBottomMenuSelected(BottomMenu.home);
+        } else if (_article != null) {
+          // Chi tiết tin: về màn hình nguồn (chuyên mục nếu mở từ chuyên mục).
+          setState(() => _article = null);
         } else if (_category != null) {
           // Danh sách chuyên mục: về Trang chủ (giữ nguyên tin đã tải).
           setState(() => _category = null);
@@ -650,7 +665,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         appBar: AppTopBar(
           title: isStudentScreen
               ? _selectedMenu.title
-              : _category?.name ?? _pageTitle,
+              : _article?.categoryName ?? _category?.name ?? _pageTitle,
           centerTitle: isStudentScreen ? true : null,
           leading: Builder(
             builder: (context) => IconButton(
@@ -672,7 +687,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               : [
                   IconButton(
                     tooltip: 'Tải lại',
-                    onPressed: _category != null
+                    onPressed: _article != null
+                        ? () => setState(() => _articleRevision++)
+                        : _category != null
                         ? () => setState(() => _categoryRevision++)
                         : _webUri == null
                         ? () => setState(() => _featuredRevision++)
@@ -690,24 +707,41 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ? _buildAccount()
               : _webUri != null
               ? _buildWebContent(controller)
-              // Trang chủ: tin nổi bật từ News REST API; chọn chuyên mục thì mở
-              // danh sách lazy load. IndexedStack giữ Trang chủ (dữ liệu, vị
-              // trí cuộn) khi đang xem chuyên mục. Chưa có trang chi tiết
-              // (bước sau) nên thẻ tin chưa nhận chạm.
+              // Tin tức: 0 = Trang chủ, 1 = danh sách chuyên mục, 2 = chi tiết.
+              // IndexedStack giữ màn hình nguồn (tin đã tải, vị trí cuộn) khi
+              // đang xem chi tiết; mỗi màn hình luôn ở đúng vị trí của nó.
               : IndexedStack(
-                  index: _category == null ? 0 : 1,
+                  index: _article != null
+                      ? 2
+                      : _category != null
+                      ? 1
+                      : 0,
                   children: [
                     FeaturedNewsContent(
                       key: ValueKey(_featuredRevision),
                       api: _newsApi,
+                      onSelected: _openArticle,
                       onCategorySelected: _openCategory,
                     ),
-                    if (_category != null)
-                      CategoryNewsContent(
-                        key: ValueKey('${_category!.uid}/$_categoryRevision'),
-                        api: _newsApi,
-                        category: _category!,
-                      ),
+                    _category == null
+                        ? const SizedBox.shrink()
+                        : CategoryNewsContent(
+                            key: ValueKey(
+                              '${_category!.uid}/$_categoryRevision',
+                            ),
+                            api: _newsApi,
+                            category: _category!,
+                            onSelected: _openArticle,
+                          ),
+                    _article == null
+                        ? const SizedBox.shrink()
+                        : NewsDetailContent(
+                            key: ValueKey(
+                              '${_article!.uid}/$_articleRevision',
+                            ),
+                            api: _newsApi,
+                            item: _article!,
+                          ),
                   ],
                 ),
         ),

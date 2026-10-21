@@ -24,6 +24,7 @@ import 'package:flutter_application_1/widgets/app_top_bar.dart';
 import 'package:flutter_application_1/widgets/category_news.dart';
 import 'package:flutter_application_1/widgets/featured_news.dart';
 import 'package:flutter_application_1/widgets/home_screen.dart';
+import 'package:flutter_application_1/widgets/news_detail.dart';
 import 'package:flutter_application_1/services/news_api.dart';
 import 'package:flutter_application_1/widgets/splash_screen.dart';
 
@@ -46,16 +47,55 @@ const _feedHtml = '''
 </div></section>
 ''';
 
-/// NewsApi giả cho Trang chủ: featured trả JSON thật, API chuyên mục trả trang
-/// rỗng. [log] ghi lại URL mọi request tin tức.
-NewsApi _newsApi([List<Uri>? log]) {
+/// Một tin giả của chuyên mục [cat] (uid = cat * 1000 + vị trí).
+Map<String, Object?> _categoryItem(int uid) => {
+  'uid': uid,
+  'cat_uid': uid ~/ 1000,
+  'category_name': 'Mục ${uid ~/ 1000}',
+  'title': 'Tin $uid',
+  'short_desc': '',
+  'post_date': '2026-10-13T08:54:00',
+  'sdgs': [4],
+  'is_featured': false,
+  'background_img': null,
+  'thumbnail_img': null,
+};
+
+/// NewsApi giả cho Trang chủ: featured trả JSON thật; API chuyên mục trả
+/// [categoryTotal] tin theo limit/offset (mặc định trang rỗng); chi tiết
+/// /api/news/{uid} trả tin đó kèm content HTML. [log] ghi lại URL mọi request.
+NewsApi _newsApi([List<Uri>? log, int categoryTotal = 0]) {
+  final featured = jsonDecode(featuredJson) as List<dynamic>;
   final api = NewsApi(
     client: MockClient((request) async {
       log?.add(request.url);
-      final body = request.url.path == '/api/news/featured'
-          ? featuredJson
-          : '{"total":0,"limit":5,"offset":0,"items":[]}';
-      return http.Response.bytes(utf8.encode(body), 200);
+      final path = request.url.path;
+      Object? body;
+      if (path == '/api/news/featured') {
+        body = featured;
+      } else if (path == '/api/news') {
+        final q = request.url.queryParameters;
+        final cat = int.parse(q['cat_uid']!);
+        final limit = int.parse(q['limit']!);
+        final offset = int.parse(q['offset']!);
+        body = {
+          'total': categoryTotal,
+          'limit': limit,
+          'offset': offset,
+          'items': [
+            for (var i = offset; i < offset + limit && i < categoryTotal; i++)
+              _categoryItem(cat * 1000 + i),
+          ],
+        };
+      } else {
+        final uid = int.parse(request.url.pathSegments.last);
+        final item = featured.firstWhere(
+          (e) => e['uid'] == uid,
+          orElse: () => _categoryItem(uid),
+        );
+        body = {...item as Map, 'content': '<p>Nội dung bài $uid</p>'};
+      }
+      return http.Response.bytes(utf8.encode(jsonEncode(body)), 200);
     }),
   );
   addTearDown(api.close);
@@ -320,11 +360,12 @@ void main() {
     Future<AuthController> pumpHome(
       WidgetTester tester, {
       bool loggedIn = false,
+      int categoryTotal = 0,
     }) async {
       frameworkHandlesBack = [];
       exitRequests = 0;
       newsRequests = [];
-      final news = _newsApi(newsRequests);
+      final news = _newsApi(newsRequests, categoryTotal);
       final messenger = tester.binding.defaultBinaryMessenger;
       messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
         if (call.method == 'SystemNavigator.setFrameworkHandlesBack') {
@@ -551,6 +592,131 @@ void main() {
       select(tester, BottomMenu.home);
       await tester.pumpAndSettle();
       expect(find.byType(CategoryNewsContent), findsNothing);
+      expect(title(tester), 'Trang chủ');
+      expect(exitRequests, 0);
+    }, variant: android);
+
+    // Danh sách còn tin thì có vòng xoay cuối trang: không dùng pumpAndSettle.
+    Future<void> frames(WidgetTester tester) async {
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+    }
+
+    testWidgets('Chi tiết: chạm tin lớn, tin nhỏ gọi đúng uid; Back về Trang chủ', (
+      tester,
+    ) async {
+      await pumpHome(tester);
+      await tester.tap(find.byType(FeaturedNewsCard));
+      await tester.pumpAndSettle();
+      expect(newsRequests.last.path, '/api/news/1');
+      expect(find.byType(NewsDetailContent), findsOneWidget);
+      expect(find.text('Nội dung bài 1'), findsOneWidget);
+      expect(title(tester), 'Cuộc sống UEH');
+      expect(canPop(tester), isFalse);
+      expect(frameworkHandlesBack.last, isTrue);
+
+      await back(tester);
+      expect(find.byType(NewsDetailContent), findsNothing);
+      expect(title(tester), 'Trang chủ');
+      expect(exitRequests, 0);
+
+      final tile = find.byType(NewsTile).first;
+      final uid = tester.widget<NewsTile>(tile).item.uid;
+      await tester.ensureVisible(tile);
+      await tester.pumpAndSettle();
+      await tester.tap(tile);
+      await tester.pumpAndSettle();
+      expect(newsRequests.last.path, '/api/news/$uid');
+      expect(find.text('Nội dung bài $uid'), findsOneWidget);
+      await back(tester);
+      expect(find.byType(NewsDetailContent), findsNothing);
+      expect(find.byType(FeaturedNewsContent), findsOneWidget);
+      expect(exitRequests, 0);
+      expect(platform.createdControllers, 0); // không dùng WebView
+    }, variant: android);
+
+    testWidgets('Chi tiết từ chuyên mục: Back về đúng chuyên mục, giữ tin đã tải và vị trí cuộn', (
+      tester,
+    ) async {
+      await pumpHome(tester, categoryTotal: 45);
+      final link = find.descendant(
+        of: find.byType(NewsCategoryLinks),
+        matching: find.text('KHOA HỌC - GÓC NHÌN CHUYÊN GIA'),
+      );
+      await tester.ensureVisible(link);
+      await frames(tester);
+      await tester.tap(link);
+      await frames(tester);
+      final list = find.descendant(
+        of: find.byType(CategoryNewsContent),
+        matching: find.byType(Scrollable),
+      );
+      await tester.drag(list, const Offset(0, -100000)); // tải trang 2
+      await frames(tester);
+      await tester.drag(list, const Offset(0, 900)); // lùi lên một đoạn
+      await frames(tester);
+      CategoryNewsContentState category() => tester
+          .state<CategoryNewsContentState>(find.byType(CategoryNewsContent));
+      expect(category().items, hasLength(40));
+      final pixels = tester.state<ScrollableState>(list).position.pixels;
+      final categoryRequests = newsRequests
+          .where((u) => u.path == '/api/news')
+          .length;
+
+      final tile = find
+          .descendant(
+            of: find.byType(CategoryNewsContent),
+            matching: find.byType(NewsTile),
+          )
+          .hitTestable()
+          .first;
+      final uid = tester.widget<NewsTile>(tile).item.uid;
+      expect(uid ~/ 1000, 220);
+      await tester.tap(tile);
+      await frames(tester);
+      expect(newsRequests.last.path, '/api/news/$uid');
+      expect(find.text('Nội dung bài $uid'), findsOneWidget);
+
+      await back(tester);
+      await frames(tester);
+      expect(find.byType(NewsDetailContent), findsNothing);
+      expect(title(tester), 'Khoa học - Góc nhìn chuyên gia');
+      expect(category().items, hasLength(40)); // không tải lại từ offset 0
+      expect(tester.state<ScrollableState>(list).position.pixels, pixels);
+      expect(
+        newsRequests.where((u) => u.path == '/api/news').length,
+        categoryRequests,
+      );
+      expect(exitRequests, 0);
+    }, variant: android);
+
+    testWidgets('Chi tiết: Drawer mở + Back chỉ đóng Drawer; tab không hiện nhầm chi tiết', (
+      tester,
+    ) async {
+      await pumpHome(tester, loggedIn: true);
+      await tester.tap(find.byType(FeaturedNewsCard));
+      await tester.pumpAndSettle();
+      await openDrawer(tester);
+      await back(tester);
+      expect(drawerOpen(tester), isFalse);
+      expect(find.byType(NewsDetailContent), findsOneWidget);
+      expect(title(tester), 'Cuộc sống UEH');
+
+      select(tester, BottomMenu.attendance);
+      await tester.pumpAndSettle();
+      expect(find.byType(AttendanceScreen), findsOneWidget);
+      expect(find.byType(NewsDetailContent), findsNothing);
+      select(tester, BottomMenu.home);
+      await tester.pumpAndSettle();
+      expect(find.byType(NewsDetailContent), findsNothing);
+      expect(title(tester), 'Trang chủ');
+
+      await tester.tap(find.byType(FeaturedNewsCard));
+      await tester.pumpAndSettle();
+      select(tester, BottomMenu.home); // tab Trang chủ khi đang xem chi tiết
+      await tester.pumpAndSettle();
+      expect(find.byType(NewsDetailContent), findsNothing);
       expect(title(tester), 'Trang chủ');
       expect(exitRequests, 0);
     }, variant: android);
