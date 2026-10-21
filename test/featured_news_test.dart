@@ -396,6 +396,41 @@ void main() {
     );
   });
 
+  testWidgets('Khu vực Danh mục tin tức: 4 chuyên mục, chọn đúng chuyên mục', (
+    tester,
+  ) async {
+    final news = _FakeNews(
+      featured: [for (var i = 0; i < 5; i++) _item(80 + i, 219 + (i % 4))],
+    );
+    await _pump(tester, news.api);
+    expect(find.byType(NewsCategoryLinks), findsNothing); // không có callback
+
+    NewsCategory? chosen;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: FeaturedNewsContent(
+            api: news.api,
+            onCategorySelected: (category) => chosen = category,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(FeaturedNewsCard), findsOneWidget);
+    expect(find.byType(NewsTile), findsNWidgets(4));
+    for (final category in NewsCategory.all) {
+      final link = find.descendant(
+        of: find.byType(NewsCategoryLinks),
+        matching: find.text(category.name.toUpperCase()),
+      );
+      await tester.ensureVisible(link);
+      await tester.pumpAndSettle();
+      await tester.tap(link);
+      expect(chosen?.uid, category.uid);
+    }
+  });
+
   test('Ngày đăng hiển thị dd/mm/yyyy', () {
     expect(formatNewsDate(DateTime(2026, 4, 1, 7)), '01/04/2026');
     expect(formatNewsDate(DateTime(2026, 10, 13)), '13/10/2026');

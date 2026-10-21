@@ -21,6 +21,7 @@ import 'package:flutter_application_1/widgets/attendance_screen.dart';
 import 'package:flutter_application_1/widgets/app_bottom_bar.dart';
 import 'package:flutter_application_1/widgets/app_drawer.dart';
 import 'package:flutter_application_1/widgets/app_top_bar.dart';
+import 'package:flutter_application_1/widgets/category_news.dart';
 import 'package:flutter_application_1/widgets/featured_news.dart';
 import 'package:flutter_application_1/widgets/home_screen.dart';
 import 'package:flutter_application_1/services/news_api.dart';
@@ -496,6 +497,62 @@ void main() {
       await back(tester);
       expect(exitRequests, 1);
       expect(platform.createdControllers, 0);
+    }, variant: android);
+
+    Future<void> openCategory(WidgetTester tester, String name) async {
+      final link = find.descendant(
+        of: find.byType(NewsCategoryLinks),
+        matching: find.text(name.toUpperCase()),
+      );
+      await tester.ensureVisible(link);
+      await tester.pumpAndSettle();
+      await tester.tap(link);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('Chuyên mục: mở từ Trang chủ, Back về Trang chủ, không thoát app', (
+      tester,
+    ) async {
+      await pumpHome(tester);
+      final featuredRequests = newsRequests
+          .where((u) => u.path == '/api/news/featured')
+          .length;
+      await openCategory(tester, 'Khoa học - Góc nhìn chuyên gia');
+      expect(find.byType(CategoryNewsContent), findsOneWidget);
+      expect(title(tester), 'Khoa học - Góc nhìn chuyên gia');
+      expect(newsRequests.last.queryParameters['cat_uid'], '220');
+      expect(canPop(tester), isFalse);
+      expect(frameworkHandlesBack.last, isTrue);
+
+      await back(tester);
+      expect(find.byType(CategoryNewsContent), findsNothing);
+      expect(find.byType(FeaturedNewsContent), findsOneWidget);
+      expect(title(tester), 'Trang chủ');
+      expect(exitRequests, 0);
+      // Trang chủ được giữ nguyên, không tải lại tin nổi bật.
+      expect(
+        newsRequests.where((u) => u.path == '/api/news/featured').length,
+        featuredRequests,
+      );
+      expect(canPop(tester), isTrue);
+    }, variant: android);
+
+    testWidgets('Chuyên mục: Drawer mở + Back chỉ đóng Drawer; tab Trang chủ về Trang chủ', (
+      tester,
+    ) async {
+      await pumpHome(tester);
+      await openCategory(tester, 'Báo chí nói về UEH');
+      await openDrawer(tester);
+      await back(tester);
+      expect(drawerOpen(tester), isFalse);
+      expect(find.byType(CategoryNewsContent), findsOneWidget);
+      expect(title(tester), 'Báo chí nói về UEH');
+
+      select(tester, BottomMenu.home);
+      await tester.pumpAndSettle();
+      expect(find.byType(CategoryNewsContent), findsNothing);
+      expect(title(tester), 'Trang chủ');
+      expect(exitRequests, 0);
     }, variant: android);
 
     testWidgets('WebView có lịch sử: Back khi Drawer mở không gọi goBack', (

@@ -12,7 +12,9 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../helpers/DBUtils.dart';
 import '../controllers/auth_controller.dart';
 import '../controllers/menu_sync_controller.dart';
+import '../models/news.dart';
 import '../services/news_api.dart';
+import 'category_news.dart';
 import 'featured_news.dart';
 import 'login_screen.dart';
 import 'app_drawer.dart';
@@ -385,6 +387,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _featuredRevision = 0;
   // Trang web của mục menu có URL ngoài; null là đang ở Trang chủ (tin tức native).
   Uri? _webUri;
+  // Chuyên mục đang mở (danh sách tin lazy load); null là đang ở Trang chủ.
+  NewsCategory? _category;
+  int _categoryRevision = 0;
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   // Cập nhật qua Scaffold.onDrawerChanged (mở/đóng bằng nút, vùng tối, kéo, chọn menu).
   bool _drawerOpen = false;
@@ -483,6 +488,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _selectedMenu = BottomMenu.home;
         _pageTitle = menu.menuName;
         _webUri = null;
+        _category = null;
         _canGoBack = false;
       });
       return;
@@ -493,6 +499,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _selectedMenu = BottomMenu.home;
         _pageTitle = menu.menuName;
         _webUri = uri;
+        _category = null;
         _canGoBack = false;
       });
       _load(() => controller.loadRequest(uri));
@@ -535,6 +542,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _selectedMenu = menu;
         _pageTitle = menu.title;
         _webUri = null;
+        _category = null;
         _canGoBack = false;
       });
       return;
@@ -583,6 +591,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void handleCommitBackGesture() => _scaffoldKey.currentState?.closeDrawer();
 
+  void _openCategory(NewsCategory category) =>
+      setState(() => _category = category);
+
   Future<void> _retryWebPage() => _load(() => _controller!.loadRequest(_webUri!));
 
   @override
@@ -604,7 +615,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return PopScope(
       // Drawer mở thì chặn pop: canPop đổi giá trị nên Flutter báo lại cho
       // Android rằng app tự xử lý Back (predictive back, Android 16+).
-      canPop: !_drawerOpen && !isStudentScreen && _webUri == null,
+      canPop:
+          !_drawerOpen &&
+          !isStudentScreen &&
+          _webUri == null &&
+          _category == null,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
         // Một lần Back khi Drawer mở chỉ đóng Drawer, không đổi tab/tin/WebView.
@@ -614,6 +629,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
         if (isStudentScreen) {
           _onBottomMenuSelected(BottomMenu.home);
+        } else if (_category != null) {
+          // Danh sách chuyên mục: về Trang chủ (giữ nguyên tin đã tải).
+          setState(() => _category = null);
         } else if (_webUri != null) {
           // Trang web ngoài: lùi trong WebView nếu có lịch sử, hết thì về Trang chủ.
           _canGoBack && controller != null
@@ -630,7 +648,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           if (open) _menu.syncIfStale();
         },
         appBar: AppTopBar(
-          title: isStudentScreen ? _selectedMenu.title : _pageTitle,
+          title: isStudentScreen
+              ? _selectedMenu.title
+              : _category?.name ?? _pageTitle,
           centerTitle: isStudentScreen ? true : null,
           leading: Builder(
             builder: (context) => IconButton(
@@ -652,7 +672,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               : [
                   IconButton(
                     tooltip: 'Tải lại',
-                    onPressed: _webUri == null
+                    onPressed: _category != null
+                        ? () => setState(() => _categoryRevision++)
+                        : _webUri == null
                         ? () => setState(() => _featuredRevision++)
                         : controller == null
                         ? null
@@ -668,11 +690,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ? _buildAccount()
               : _webUri != null
               ? _buildWebContent(controller)
-              // Trang chủ: tin nổi bật từ News REST API. Chưa có trang chi tiết
+              // Trang chủ: tin nổi bật từ News REST API; chọn chuyên mục thì mở
+              // danh sách lazy load. IndexedStack giữ Trang chủ (dữ liệu, vị
+              // trí cuộn) khi đang xem chuyên mục. Chưa có trang chi tiết
               // (bước sau) nên thẻ tin chưa nhận chạm.
-              : FeaturedNewsContent(
-                  key: ValueKey(_featuredRevision),
-                  api: _newsApi,
+              : IndexedStack(
+                  index: _category == null ? 0 : 1,
+                  children: [
+                    FeaturedNewsContent(
+                      key: ValueKey(_featuredRevision),
+                      api: _newsApi,
+                      onCategorySelected: _openCategory,
+                    ),
+                    if (_category != null)
+                      CategoryNewsContent(
+                        key: ValueKey('${_category!.uid}/$_categoryRevision'),
+                        api: _newsApi,
+                        category: _category!,
+                      ),
+                  ],
                 ),
         ),
         bottomNavigationBar: AppBottomBar(

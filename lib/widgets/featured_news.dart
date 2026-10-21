@@ -70,12 +70,21 @@ Future<FeaturedNews> loadFeaturedNews(NewsApi api, {int smallCount = 4}) async {
 
 /// Trang chủ: tin nổi bật lấy từ News REST API, hiển thị bằng widget Flutter.
 class FeaturedNewsContent extends StatefulWidget {
-  const FeaturedNewsContent({super.key, required this.api, this.onSelected});
+  const FeaturedNewsContent({
+    super.key,
+    required this.api,
+    this.onSelected,
+    this.onCategorySelected,
+  });
 
   final NewsApi api;
 
   /// Chạm vào một tin. null thì thẻ tin không nhận chạm (chưa có trang chi tiết).
   final ValueChanged<NewsItem>? onSelected;
+
+  /// Chọn một chuyên mục ở khu vực "Danh mục tin tức" cuối trang.
+  /// null thì không hiện khu vực này.
+  final ValueChanged<NewsCategory>? onCategorySelected;
 
   @override
   State<FeaturedNewsContent> createState() => _FeaturedNewsContentState();
@@ -163,6 +172,10 @@ class _FeaturedNewsContentState extends State<FeaturedNewsContent> {
                 for (final item in news.others) ...[
                   const SizedBox(height: 20),
                   NewsTile(item: item, onTap: _tap(item)),
+                ],
+                if (widget.onCategorySelected != null) ...[
+                  const SizedBox(height: 28),
+                  NewsCategoryLinks(onSelected: widget.onCategorySelected!),
                 ],
                 const SizedBox(height: 8),
               ],
@@ -283,6 +296,53 @@ class NewsTile extends StatelessWidget {
         ],
       ),
     ),
+  );
+}
+
+/// Khu vực "Danh mục tin tức": 4 chuyên mục lấy từ [NewsCategory.all].
+class NewsCategoryLinks extends StatelessWidget {
+  const NewsCategoryLinks({super.key, required this.onSelected});
+
+  final ValueChanged<NewsCategory> onSelected;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const Text(
+        'Danh mục tin tức',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: _newsOrange,
+          fontSize: 24,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      for (final category in NewsCategory.all) ...[
+        const SizedBox(height: 12),
+        _Card(
+          onTap: () => onSelected(category),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    category.name.toUpperCase(),
+                    style: const TextStyle(
+                      color: _categoryBlue,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const Icon(Icons.chevron_right, color: _categoryBlue),
+              ],
+            ),
+          ),
+        ),
+      ],
+    ],
   );
 }
 
