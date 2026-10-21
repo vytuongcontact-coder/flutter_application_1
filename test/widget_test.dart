@@ -21,10 +21,13 @@ import 'package:flutter_application_1/widgets/attendance_screen.dart';
 import 'package:flutter_application_1/widgets/app_bottom_bar.dart';
 import 'package:flutter_application_1/widgets/app_drawer.dart';
 import 'package:flutter_application_1/widgets/app_top_bar.dart';
+import 'package:flutter_application_1/widgets/featured_news.dart';
 import 'package:flutter_application_1/widgets/home_screen.dart';
+import 'package:flutter_application_1/services/news_api.dart';
 import 'package:flutter_application_1/widgets/splash_screen.dart';
 
 import 'menu_fixtures.dart';
+import 'news_fixtures.dart';
 import 'student_api_test.dart'
     show MemoryTokenStore, jsonResponse, tokens, profileJson;
 
@@ -42,6 +45,30 @@ const _feedHtml = '''
 </div></section>
 ''';
 
+/// NewsApi giả cho Trang chủ: featured trả JSON thật, API chuyên mục trả trang
+/// rỗng. [log] ghi lại URL mọi request tin tức.
+NewsApi _newsApi([List<Uri>? log]) {
+  final api = NewsApi(
+    client: MockClient((request) async {
+      log?.add(request.url);
+      final body = request.url.path == '/api/news/featured'
+          ? featuredJson
+          : '{"total":0,"limit":5,"offset":0,"items":[]}';
+      return http.Response.bytes(utf8.encode(body), 200);
+    }),
+  );
+  addTearDown(api.close);
+  return api;
+}
+
+const _externalMenu = MenuNav(
+  id: 99,
+  iconName: 'globe',
+  menuName: 'Trang ngoài',
+  menuUrl: 'https://ueh.edu.vn/trang-khac',
+  ordering: 99,
+);
+
 NewsService _service() => NewsService(
   client: MockClient(
     (request) async => http.Response.bytes(utf8.encode(_feedHtml), 200),
@@ -50,7 +77,7 @@ NewsService _service() => NewsService(
 
 void main() {
   testWidgets(
-    'Menu mở bài bằng WebView của Home, reload/retry đúng URL và Back về danh sách',
+    'Trang chủ không dùng WebView; menu có URL ngoài mở WebView, reload/retry đúng URL, Back về Trang chủ',
     (tester) async {
       final previousPlatform = WebViewPlatform.instance;
       final platform = _FakeWebViewPlatform();
@@ -58,23 +85,22 @@ void main() {
       addTearDown(() {
         WebViewPlatform.instance = previousPlatform ?? _FakeWebViewPlatform();
       });
-      await tester.pumpWidget(const MyApp());
-      await tester.pump(SplashScreen.displayDuration);
+      final newsLog = <Uri>[];
+      await tester.pumpWidget(
+        MaterialApp(home: HomeScreen(newsApi: _newsApi(newsLog))),
+      );
       await tester.pumpAndSettle();
       final homeState = tester.state(find.byType(HomeScreen));
-      final homeController = tester
-          .widget<WebViewWidget>(find.byType(WebViewWidget))
-          .platform
-          .params
-          .controller;
-      expect(
-        platform.controller.loads.single.toString(),
-        HomeScreen.websiteUrl,
-      );
-      expect(platform.controller.javaScriptMode, JavaScriptMode.unrestricted);
+      // Trang chủ: tin nổi bật native từ News REST API, không tạo WebView.
+      expect(find.byType(FeaturedNewsContent), findsOneWidget);
+      expect(find.byType(WebViewWidget), findsNothing);
+      expect(platform.createdControllers, 0);
+      expect(newsLog.first.path, '/api/news/featured');
 
+      // "Tin tức UEH" về giao diện tin tức native, không mở website.
       final scaffold = tester.widget<Scaffold>(find.byType(Scaffold));
-      (scaffold.drawer! as AppDrawer).onSelected(
+      final drawer = scaffold.drawer! as AppDrawer;
+      drawer.onSelected(
         const MenuNav(
           id: 1,
           iconName: 'newspaper',
@@ -84,29 +110,20 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      final article = NewsArticle(
-        title: 'Tin UEH',
-        url: Uri.parse('https://ueh.edu.vn/article?app=true'),
-        category: 'Cuộc sống UEH',
+      expect(find.byType(FeaturedNewsContent), findsOneWidget);
+      expect(platform.createdControllers, 0);
+      expect(
+        tester.widget<AppTopBar>(find.byType(AppTopBar)).title,
+        'Tin tức UEH',
       );
-      tester
-          .widget<NewsListContent>(find.byType(NewsListContent))
-          .onSelected(article);
+
+      // Menu có URL ngoài: mới tạo WebView và tải đúng URL đó.
+      drawer.onSelected(_externalMenu);
       await tester.pumpAndSettle();
-      expect(
-        tester
-            .widget<WebViewWidget>(find.byType(WebViewWidget))
-            .platform
-            .params
-            .controller,
-        same(homeController),
-      );
-      expect(platform.controller.loads.last, article.url);
       expect(platform.createdControllers, 1);
-      expect(
-        find.text('Tin UEH'),
-        findsNothing,
-      ); // Nội dung do website hiển thị.
+      expect(platform.controller.loads.single.toString(), _externalMenu.menuUrl);
+      expect(platform.controller.javaScriptMode, JavaScriptMode.unrestricted);
+      expect(find.byType(FeaturedNewsContent), findsNothing);
 
       await tester.tap(find.byTooltip('Tải lại'));
       await tester.pumpAndSettle();
@@ -121,40 +138,19 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Thử lại'));
       await tester.pumpAndSettle();
-      expect(platform.controller.loads.last, article.url);
+      expect(platform.controller.loads.last.toString(), _externalMenu.menuUrl);
 
-      await tester.binding.handlePopRoute();
+      // Không có lịch sử web: Back về Trang chủ (tin tức native).
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
-      expect(find.byType(NewsListContent), findsOneWidget);
       expect(find.byType(WebViewWidget), findsNothing);
-      expect(
-        tester.widget<AppTopBar>(find.byType(AppTopBar)).title,
-        'Tin tức UEH',
-      );
-
-      tester
-          .widget<NewsListContent>(find.byType(NewsListContent))
-          .onSelected(article);
-      await tester.pumpAndSettle();
-      tester
-          .widget<AppBottomBar>(find.byType(AppBottomBar))
-          .onSelected(BottomMenu.home);
-      await tester.pumpAndSettle();
-      expect(platform.controller.loads.last.toString(), HomeScreen.websiteUrl);
-      expect(tester.state(find.byType(HomeScreen)), same(homeState));
-      expect(
-        tester
-            .widget<WebViewWidget>(find.byType(WebViewWidget))
-            .platform
-            .params
-            .controller,
-        same(homeController),
-      );
+      expect(find.byType(FeaturedNewsContent), findsOneWidget);
       expect(
         tester.widget<AppTopBar>(find.byType(AppTopBar)).title,
         'Trang chủ',
       );
+      expect(tester.state(find.byType(HomeScreen)), same(homeState));
+      expect(platform.createdControllers, 1);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },
@@ -228,7 +224,10 @@ void main() {
   testWidgets(
     'Bottom Trang chủ trả về Home hiện có và giữ nguyên màu thanh điều hướng',
     (tester) async {
-      await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
+      await tester.pumpWidget(
+        MaterialApp(home: HomeScreen(newsApi: _newsApi())),
+      );
+      await tester.pumpAndSettle();
       final homeState = tester.state(find.byType(HomeScreen));
       final scaffold = tester.widget<Scaffold>(find.byType(Scaffold));
       (scaffold.drawer! as AppDrawer).onSelected(
@@ -241,7 +240,8 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.byType(NewsListContent), findsOneWidget);
+      expect(find.byType(FeaturedNewsContent), findsOneWidget);
+      expect(find.byType(NewsListContent), findsNothing);
       expect(
         tester.widget<AppTopBar>(find.byType(AppTopBar)).title,
         'Tin tức UEH',
@@ -256,7 +256,7 @@ void main() {
           .widget<AppBottomBar>(find.byType(AppBottomBar))
           .onSelected(BottomMenu.home);
       await tester.pumpAndSettle();
-      expect(find.byType(NewsListContent), findsNothing);
+      expect(find.byType(FeaturedNewsContent), findsOneWidget);
       expect(tester.state(find.byType(HomeScreen)), same(homeState));
       expect(
         tester.widget<AppTopBar>(find.byType(AppTopBar)).title,
@@ -282,6 +282,8 @@ void main() {
     );
     expect(appBarTitle, findsOneWidget);
     expect(find.byTooltip('Trang chủ'), findsOneWidget);
+    // Sau Splash, Trang chủ là giao diện tin tức native (không phải WebView).
+    expect(find.byType(FeaturedNewsContent), findsOneWidget);
     final context = tester.element(appBarTitle);
     expect(GoRouter.of(context).canPop(), isFalse);
     expect(tester.takeException(), isNull);
@@ -302,6 +304,7 @@ void main() {
     late _FakeWebViewPlatform platform;
     late List<Object?> frameworkHandlesBack; // tín hiệu Flutter gửi Android
     late int exitRequests; // số lần Flutter yêu cầu thoát app
+    late List<Uri> newsRequests; // request tới News REST API
 
     setUp(() {
       final previous = WebViewPlatform.instance;
@@ -319,6 +322,8 @@ void main() {
     }) async {
       frameworkHandlesBack = [];
       exitRequests = 0;
+      newsRequests = [];
+      final news = _newsApi(newsRequests);
       final messenger = tester.binding.defaultBinaryMessenger;
       messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
         if (call.method == 'SystemNavigator.setFrameworkHandlesBack') {
@@ -347,7 +352,7 @@ void main() {
         routes: [
           GoRoute(
             path: '/',
-            builder: (_, _) => HomeScreen(auth: auth, menu: menu),
+            builder: (_, _) => HomeScreen(auth: auth, menu: menu, newsApi: news),
           ),
         ],
       );
@@ -402,7 +407,8 @@ void main() {
       tester,
     ) async {
       await pumpHome(tester);
-      final loads = platform.controller.loads.length;
+      final requests = newsRequests.length;
+      expect(find.byType(FeaturedNewsContent), findsOneWidget);
       expect(canPop(tester), isTrue);
 
       await openDrawer(tester);
@@ -414,8 +420,8 @@ void main() {
       expect(drawerOpen(tester), isFalse);
       expect(exitRequests, 0);
       expect(title(tester), 'Trang chủ');
-      expect(platform.controller.loads.length, loads); // WebView không tải lại
-      expect(platform.controller.reloads, 0);
+      expect(newsRequests.length, requests); // tin tức không tải lại
+      expect(find.byType(FeaturedNewsContent), findsOneWidget);
       expect(canPop(tester), isTrue);
       expect(frameworkHandlesBack.last, isFalse);
 
@@ -467,7 +473,7 @@ void main() {
       expect(exitRequests, 0);
     }, variant: android);
 
-    testWidgets('Danh sách tin: Back khi Drawer mở giữ nguyên danh sách', (
+    testWidgets('Tin tức UEH (Drawer): Back khi Drawer mở giữ nguyên trang tin', (
       tester,
     ) async {
       await pumpHome(tester);
@@ -475,18 +481,21 @@ void main() {
       await tester.tap(find.text('Tin tức UEH'));
       await tester.pumpAndSettle();
       expect(drawerOpen(tester), isFalse);
-      expect(find.byType(NewsListContent), findsOneWidget);
+      expect(find.byType(FeaturedNewsContent), findsOneWidget);
+      expect(title(tester), 'Tin tức UEH');
 
       await openDrawer(tester);
       await back(tester);
       expect(drawerOpen(tester), isFalse);
-      expect(find.byType(NewsListContent), findsOneWidget);
+      expect(find.byType(FeaturedNewsContent), findsOneWidget);
       expect(title(tester), 'Tin tức UEH');
-
-      await back(tester);
-      expect(find.byType(NewsListContent), findsNothing);
-      expect(title(tester), 'Trang chủ');
       expect(exitRequests, 0);
+
+      // Trang tin chính là Trang chủ (không phải màn hình con): Drawer đóng thì
+      // Back giữ hành vi ở Trang chủ.
+      await back(tester);
+      expect(exitRequests, 1);
+      expect(platform.createdControllers, 0);
     }, variant: android);
 
     testWidgets('WebView có lịch sử: Back khi Drawer mở không gọi goBack', (
@@ -494,6 +503,9 @@ void main() {
     ) async {
       platform.hasHistory = true;
       await pumpHome(tester);
+      final scaffold = tester.widget<Scaffold>(find.byType(Scaffold).first);
+      (scaffold.drawer! as AppDrawer).onSelected(_externalMenu);
+      await tester.pumpAndSettle();
       expect(canPop(tester), isFalse);
 
       await openDrawer(tester);

@@ -12,6 +12,8 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../helpers/DBUtils.dart';
 import '../controllers/auth_controller.dart';
 import '../controllers/menu_sync_controller.dart';
+import '../services/news_api.dart';
+import 'featured_news.dart';
 import 'login_screen.dart';
 import 'app_drawer.dart';
 import 'app_bottom_bar.dart';
@@ -21,7 +23,9 @@ import 'account_screen.dart';
 
 const _newsOrange = Color(0xFFFF6F00);
 
-// Các phần tin tức đặt trong file hiện có theo phạm vi được duyệt.
+// Bản tin cũ: tải HTML website rồi phân tích. Không còn dùng làm nội dung
+// Trang chủ (Trang chủ dùng FeaturedNewsContent + News REST API); giữ lại cho
+// tới khi được phép dọn cùng các test của nó.
 class NewsArticle {
   const NewsArticle({
     required this.title,
@@ -348,12 +352,15 @@ class _NewsLoadError extends StatelessWidget {
 }
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, this.auth, this.menu});
+  const HomeScreen({super.key, this.auth, this.menu, this.newsApi});
 
   final AuthController? auth;
 
   /// Truyền vào khi test; mặc định tạo controller đọc SQLite thật.
   final MenuSyncController? menu;
+
+  /// Truyền vào khi test; mặc định gọi News REST API thật.
+  final NewsApi? newsApi;
 
   // Đổi URL tại đây hoặc dùng flutter run --dart-define=UEH_URL=https://...
   static const websiteUrl = DBUtils.newsUrl;
@@ -373,11 +380,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String? _error;
   String _pageTitle = BottomMenu.home.title;
   BottomMenu _selectedMenu = BottomMenu.home;
-  final _newsService = NewsService();
-  Uri? _newsUri;
-  NewsArticle? _article;
-  int _newsRevision = 0;
-  bool _handlingNewsBack = false;
+  late final NewsApi _newsApi;
+  // Tăng để FeaturedNewsContent tải lại (nút Tải lại).
+  int _featuredRevision = 0;
+  // Trang web của mục menu có URL ngoài; null là đang ở Trang chủ (tin tức native).
+  Uri? _webUri;
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   // Cập nhật qua Scaffold.onDrawerChanged (mở/đóng bằng nút, vùng tối, kéo, chọn menu).
   bool _drawerOpen = false;
@@ -392,6 +399,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _newsApi = widget.newsApi ?? NewsApi();
     _auth = widget.auth ?? AuthController();
     // Menu dùng chung StudentApi (và token) của AuthController.
     _menu = widget.menu ?? MenuSyncController(api: _auth.api);
@@ -401,8 +409,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _menu.loadCache();
     if (_auth.isLoggedIn) _menu.sync();
     if (_auth.initializing) _auth.initialize();
-    if (!_supportsWebView) return;
-    _controller = WebViewController()
+  }
+
+  // WebView chỉ tạo khi mở mục menu có URL ngoài; Trang chủ không dùng WebView.
+  WebViewController? _ensureWebController() {
+    if (_controller != null || !_supportsWebView) return _controller;
+    return _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(
         NavigationDelegate(
@@ -435,7 +447,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           },
         ),
       );
-    _openHome();
   }
 
   void _onAuthChanged() {
@@ -464,25 +475,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         uri != null &&
         uri.hasAuthority &&
         (uri.scheme == 'https' || uri.scheme == 'http');
+    // "Tin tức UEH": về giao diện tin tức native, không mở website trong WebView.
     if (hasUrl &&
         (menu.iconName == 'newspaper' ||
             uri.path == Uri.parse(HomeScreen.websiteUrl).path)) {
       setState(() {
         _selectedMenu = BottomMenu.home;
         _pageTitle = menu.menuName;
-        _newsUri = uri;
-        _article = null;
+        _webUri = null;
+        _canGoBack = false;
       });
       return;
     }
-    if (hasUrl && _controller != null) {
+    final controller = hasUrl ? _ensureWebController() : null;
+    if (controller != null && uri != null) {
       setState(() {
         _selectedMenu = BottomMenu.home;
         _pageTitle = menu.menuName;
-        _newsUri = null;
-        _article = null;
+        _webUri = uri;
+        _canGoBack = false;
       });
-      _load(() => _controller!.loadRequest(uri));
+      _load(() => controller.loadRequest(uri));
       return;
     }
 
@@ -521,10 +534,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         _selectedMenu = menu;
         _pageTitle = menu.title;
-        _newsUri = null;
-        _article = null;
+        _webUri = null;
+        _canGoBack = false;
       });
-      if (_controller != null) _openHome();
       return;
     }
 
@@ -534,17 +546,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ..showSnackBar(
         SnackBar(content: Text('${menu.title}: chức năng hiện chưa khả dụng.')),
       );
-  }
-
-  Future<void> _openHome() async {
-    final uri = Uri.tryParse(HomeScreen.websiteUrl);
-    if (uri == null ||
-        !uri.hasAuthority ||
-        (uri.scheme != 'https' && uri.scheme != 'http')) {
-      setState(() => _error = 'URL website không hợp lệ.');
-      return;
-    }
-    await _load(() => _controller!.loadRequest(uri));
   }
 
   Future<void> _load(Future<void> Function() action) async {
@@ -572,38 +573,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
   }
 
-  void _backFromNews() {
-    // Một thao tác Back chỉ thay đổi một cấp, kể cả khi nền tảng báo lại
-    // callback trước khi frame điều hướng mới được dựng.
-    if (_handlingNewsBack) return;
-    _handlingNewsBack = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _handlingNewsBack = false;
-    });
-    if (_article != null) {
-      setState(() => _article = null);
-    } else {
-      _onBottomMenuSelected(BottomMenu.home);
-    }
-  }
-
-  void _openNewsArticle(NewsArticle article) {
-    final controller = _controller;
-    if (controller == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Vui lòng mở ứng dụng trên Android, iOS hoặc macOS để xem nội dung.',
-          ),
-        ),
-      );
-      return;
-    }
-    setState(() => _article = article);
-    // Dùng chính WebView của Trang chủ để giữ HTML, CSS và redirect của website.
-    _load(() => controller.loadRequest(article.url));
-  }
-
   // Cử chỉ vuốt Back (predictive back, Android 16+) bắt đầu khi Drawer đang mở:
   // HomeScreen giữ cử chỉ này và chỉ đóng Drawer. Các chạm đầu của cú vuốt có
   // thể lọt vào Drawer làm nó tự đóng trước khi Back được xác nhận; nếu để Back
@@ -614,9 +583,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void handleCommitBackGesture() => _scaffoldKey.currentState?.closeDrawer();
 
-  Future<void> _retryWebPage() => _article == null
-      ? _openHome()
-      : _load(() => _controller!.loadRequest(_article!.url));
+  Future<void> _retryWebPage() => _load(() => _controller!.loadRequest(_webUri!));
 
   @override
   void dispose() {
@@ -624,7 +591,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _auth.removeListener(_onAuthChanged);
     if (widget.menu == null) _menu.dispose();
     if (widget.auth == null) _auth.dispose();
-    _newsService.close();
+    if (widget.newsApi == null) _newsApi.close();
     super.dispose();
   }
 
@@ -637,7 +604,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return PopScope(
       // Drawer mở thì chặn pop: canPop đổi giá trị nên Flutter báo lại cho
       // Android rằng app tự xử lý Back (predictive back, Android 16+).
-      canPop: !_drawerOpen && !isStudentScreen && _newsUri == null && !_canGoBack,
+      canPop: !_drawerOpen && !isStudentScreen && _webUri == null,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
         // Một lần Back khi Drawer mở chỉ đóng Drawer, không đổi tab/tin/WebView.
@@ -647,10 +614,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
         if (isStudentScreen) {
           _onBottomMenuSelected(BottomMenu.home);
-        } else if (_newsUri != null) {
-          _backFromNews();
-        } else if (_canGoBack && controller != null) {
-          _load(controller.goBack);
+        } else if (_webUri != null) {
+          // Trang web ngoài: lùi trong WebView nếu có lịch sử, hết thì về Trang chủ.
+          _canGoBack && controller != null
+              ? _load(controller.goBack)
+              : _onBottomMenuSelected(BottomMenu.home);
         }
       },
       child: Scaffold(
@@ -684,8 +652,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               : [
                   IconButton(
                     tooltip: 'Tải lại',
-                    onPressed: _newsUri != null && _article == null
-                        ? () => setState(() => _newsRevision++)
+                    onPressed: _webUri == null
+                        ? () => setState(() => _featuredRevision++)
                         : controller == null
                         ? null
                         : () => _load(controller.reload),
@@ -698,20 +666,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ? AttendanceScreen(api: _auth.api)
               : isAccount
               ? _buildAccount()
-              : _newsUri != null
-              ? IndexedStack(
-                  index: _article == null ? 0 : 1,
-                  children: [
-                    NewsListContent(
-                      key: ValueKey('$_newsUri/$_newsRevision'),
-                      uri: _newsUri!,
-                      service: _newsService,
-                      onSelected: _openNewsArticle,
-                    ),
-                    if (_article != null) _buildWebContent(controller),
-                  ],
-                )
-              : _buildWebContent(controller),
+              : _webUri != null
+              ? _buildWebContent(controller)
+              // Trang chủ: tin nổi bật từ News REST API. Chưa có trang chi tiết
+              // (bước sau) nên thẻ tin chưa nhận chạm.
+              : FeaturedNewsContent(
+                  key: ValueKey(_featuredRevision),
+                  api: _newsApi,
+                ),
         ),
         bottomNavigationBar: AppBottomBar(
           selectedMenu: _selectedMenu,
