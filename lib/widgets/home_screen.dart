@@ -10,6 +10,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../helpers/DBUtils.dart';
 import '../controllers/auth_controller.dart';
+import '../controllers/menu_sync_controller.dart';
 import 'login_screen.dart';
 import 'app_drawer.dart';
 import 'app_bottom_bar.dart';
@@ -346,9 +347,12 @@ class _NewsLoadError extends StatelessWidget {
 }
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, this.auth});
+  const HomeScreen({super.key, this.auth, this.menu});
 
   final AuthController? auth;
+
+  /// Truyền vào khi test; mặc định tạo controller đọc SQLite thật.
+  final MenuSyncController? menu;
 
   // Đổi URL tại đây hoặc dùng flutter run --dart-define=UEH_URL=https://...
   static const websiteUrl = DBUtils.newsUrl;
@@ -359,6 +363,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   late final AuthController _auth;
+  late final MenuSyncController _menu;
   BottomMenu? _afterLogin;
   bool _wasLoggedIn = false;
   WebViewController? _controller;
@@ -383,8 +388,13 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _auth = widget.auth ?? AuthController();
+    // Menu dùng chung StudentApi (và token) của AuthController.
+    _menu = widget.menu ?? MenuSyncController(api: _auth.api);
     _wasLoggedIn = _auth.isLoggedIn;
     _auth.addListener(_onAuthChanged);
+    // Cache-then-network: hiển thị menu đã lưu ngay khi mở app.
+    _menu.loadCache();
+    if (_auth.isLoggedIn) _menu.sync();
     if (_auth.initializing) _auth.initialize();
     if (!_supportsWebView) return;
     _controller = WebViewController()
@@ -425,6 +435,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _onAuthChanged() {
     if (!mounted) return;
+    final loggedIn = _auth.isLoggedIn;
+    // Vừa đăng nhập hoặc khôi phục phiên: đồng bộ menu.
+    // Vừa đăng xuất hoặc hết phiên: bỏ kết quả của request menu đang chạy.
+    if (loggedIn != _wasLoggedIn) {
+      loggedIn ? _menu.sync() : _menu.cancelSync();
+    }
     setState(() {
       if (_wasLoggedIn && !_auth.isLoggedIn) {
         _selectedMenu = BottomMenu.account;
@@ -590,6 +606,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _auth.removeListener(_onAuthChanged);
+    if (widget.menu == null) _menu.dispose();
     if (widget.auth == null) _auth.dispose();
     _newsService.close();
     super.dispose();
@@ -614,7 +631,11 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       },
       child: Scaffold(
-        drawer: AppDrawer(onSelected: _onMenuSelected),
+        drawer: AppDrawer(menu: _menu, onSelected: _onMenuSelected),
+        // Mở Drawer: thử đồng bộ lại nếu lần trước lỗi hoặc dữ liệu đã cũ.
+        onDrawerChanged: (open) {
+          if (open) _menu.syncIfStale();
+        },
         appBar: AppTopBar(
           title: isStudentScreen ? _selectedMenu.title : _pageTitle,
           centerTitle: isStudentScreen ? true : null,

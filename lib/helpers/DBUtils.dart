@@ -1,18 +1,34 @@
 // Giữ tên file DBUtils.dart theo yêu cầu của dự án.
 // ignore_for_file: file_names
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
 import 'package:sqflite/sqflite.dart';
+
+import '../models/menu_nav.dart';
+
+// Giữ import cũ `helpers/DBUtils.dart` vẫn dùng được MenuNav.
+export '../models/menu_nav.dart';
 
 class DBUtils {
   DBUtils._();
 
   static const databaseName = 'student_app.db';
+
+  /// Version 1: bảng menu_nav dùng cột `oredering` (sai chính tả) và 11 menu mẫu.
+  /// Version 2: cột `ordering`, id lấy từ server, thêm bảng app_meta.
+  static const databaseVersion = 2;
   static const menuTable = 'menu_nav';
+  static const metaTable = 'app_meta';
+  static const menuSyncedAtKey = 'menu_synced_at';
   static const newsUrl = String.fromEnvironment(
     'UEH_URL',
     defaultValue: 'https://ueh.edu.vn/tintucmobile',
   );
+
+  /// Chỉ dùng trong test: trỏ tới file database tạm thay cho database thật.
+  @visibleForTesting
+  static String? debugDatabasePath;
 
   static Future<Database>? _database;
 
@@ -21,26 +37,15 @@ class DBUtils {
   static Future<Database> _openDatabase() async {
     try {
       return await openDatabase(
-        path.join(await getDatabasesPath(), databaseName),
-        version: 1,
+        debugDatabasePath ??
+            path.join(await getDatabasesPath(), databaseName),
+        version: databaseVersion,
+        // Cài mới không còn chèn menu mẫu: menu chỉ đến từ GET /api/menu.
         onCreate: (db, version) async {
-          await db.execute('''
-            CREATE TABLE menu_nav (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              icon_name TEXT,
-              menu_name TEXT,
-              menu_url TEXT,
-              oredering INTEGER
-            )
-          ''');
-
-          // onCreate chạy trong transaction; chỉ thêm menu khi tạo DB lần đầu.
-          final batch = db.batch();
-          for (final menu in _initialMenus) {
-            batch.insert(menuTable, menu.toMap());
-          }
-          await batch.commit(noResult: true);
+          await _createMenuTable(db, menuTable);
+          await _createMetaTable(db);
         },
+        onUpgrade: _upgrade,
       );
     } catch (_) {
       // Cho phép thử mở lại khi lần khởi tạo trước thất bại.
@@ -49,110 +54,106 @@ class DBUtils {
     }
   }
 
+  static Future<void> _createMenuTable(DatabaseExecutor db, String table) =>
+      db.execute('''
+        CREATE TABLE $table (
+          id INTEGER PRIMARY KEY,
+          icon_name TEXT NOT NULL,
+          menu_name TEXT NOT NULL,
+          menu_url TEXT NOT NULL,
+          ordering INTEGER NOT NULL
+        )
+      ''');
+
+  static Future<void> _createMetaTable(DatabaseExecutor db) => db.execute('''
+        CREATE TABLE $metaTable (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        )
+      ''');
+
+  // sqflite đã chạy onUpgrade trong một transaction: lỗi ở bất kỳ bước nào thì
+  // rollback toàn bộ và database giữ nguyên version cũ. Không mở transaction lồng.
+  static Future<void> _upgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // Không dùng RENAME COLUMN (cần SQLite 3.25+, một số máy Android cũ chưa có):
+      // tạo bảng mới, chép dữ liệu, xóa bảng cũ rồi đổi tên bảng mới.
+      await _createMenuTable(db, 'menu_nav_v2');
+      await db.execute('''
+        INSERT INTO menu_nav_v2 (id, icon_name, menu_name, menu_url, ordering)
+        SELECT id, IFNULL(icon_name, ''), IFNULL(menu_name, ''),
+               IFNULL(menu_url, ''), IFNULL(oredering, 0)
+        FROM menu_nav
+      ''');
+      await db.execute('DROP TABLE menu_nav');
+      await db.execute('ALTER TABLE menu_nav_v2 RENAME TO menu_nav');
+      // Chưa ghi menu_synced_at: menu chuyển sang chỉ là menu mẫu của bản cũ,
+      // chưa phải dữ liệu đã đồng bộ từ server.
+      await _createMetaTable(db);
+    }
+    // Version sau: thêm `if (oldVersion < 3) { ... }` ở đây, không sửa bước cũ.
+  }
+
   static Future<List<MenuNav>> getMenus() async {
     final db = await database;
-    final rows = await db.query(menuTable, orderBy: 'oredering ASC, id ASC');
+    final rows = await db.query(menuTable, orderBy: 'ordering ASC, id ASC');
     return rows.map(MenuNav.fromMap).toList();
   }
 
-  static const _initialMenus = [
-    MenuNav(
-      iconName: 'newspaper',
-      menuName: 'Tin tức UEH',
-      menuUrl: newsUrl,
-      oredering: 1,
-    ),
-    MenuNav(
-      iconName: 'calendarDays',
-      menuName: 'Sự kiện UEH',
-      menuUrl: '',
-      oredering: 2,
-    ),
-    MenuNav(
-      iconName: 'graduationCap',
-      menuName: 'Xem điểm',
-      menuUrl: '',
-      oredering: 3,
-    ),
-    MenuNav(
-      iconName: 'idBadge',
-      menuName: 'Định danh khuôn mặt',
-      menuUrl: '',
-      oredering: 4,
-    ),
-    MenuNav(
-      iconName: 'calendarWeek',
-      menuName: 'Thời khóa biểu',
-      menuUrl: '',
-      oredering: 5,
-    ),
-    MenuNav(
-      iconName: 'filePen',
-      menuName: 'Lịch thi',
-      menuUrl: '',
-      oredering: 6,
-    ),
-    MenuNav(
-      iconName: 'heartPulse',
-      menuName: 'Chăm sóc sức khỏe',
-      menuUrl: '',
-      oredering: 7,
-    ),
-    MenuNav(
-      iconName: 'leaf',
-      menuName: 'UEH Go Green Station',
-      menuUrl: '',
-      oredering: 8,
-    ),
-    MenuNav(
-      iconName: 'headset',
-      menuName: 'Liên hệ trực tiếp UEH',
-      menuUrl: '',
-      oredering: 9,
-    ),
-    MenuNav(
-      iconName: 'coins',
-      menuName: 'UEH Green Coin',
-      menuUrl: '',
-      oredering: 10,
-    ),
-    MenuNav(
-      iconName: 'clipboardCheck',
-      menuName: 'Đã điểm danh',
-      menuUrl: '',
-      oredering: 11,
-    ),
-  ];
-}
+  /// Lần đồng bộ Menu API thành công gần nhất; null nếu chưa từng đồng bộ.
+  static Future<DateTime?> getMenuSyncedAt() async {
+    final db = await database;
+    final rows = await db.query(
+      metaTable,
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [menuSyncedAtKey],
+    );
+    return rows.isEmpty ? null : DateTime.tryParse(rows.single['value'] as String);
+  }
 
-class MenuNav {
-  const MenuNav({
-    this.id,
-    required this.iconName,
-    required this.menuName,
-    required this.menuUrl,
-    required this.oredering,
-  });
+  /// Thay toàn bộ menu bằng danh sách từ server trong một transaction.
+  ///
+  /// Trả về true nếu dữ liệu khác với cache. Lỗi giữa chừng (ví dụ trùng id)
+  /// thì rollback: cache cũ và thời điểm đồng bộ cũ được giữ nguyên.
+  static Future<bool> replaceMenus(
+    List<MenuNav> menus, {
+    required DateTime syncedAt,
+  }) async {
+    final db = await database;
+    return db.transaction((txn) async {
+      final current = (await txn.query(
+        menuTable,
+        orderBy: 'ordering ASC, id ASC',
+      )).map(MenuNav.fromMap).toList();
+      final incoming = [...menus]..sort(MenuNav.compare);
+      final changed = !listEquals(current, incoming);
+      if (changed) {
+        await txn.delete(menuTable);
+        final batch = txn.batch();
+        for (final menu in incoming) {
+          batch.insert(menuTable, menu.toMap());
+        }
+        await batch.commit(noResult: true);
+      }
+      await txn.insert(metaTable, {
+        'key': menuSyncedAtKey,
+        'value': syncedAt.toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      return changed;
+    });
+  }
 
-  final int? id;
-  final String iconName;
-  final String menuName;
-  final String menuUrl;
-  final int oredering;
-
-  factory MenuNav.fromMap(Map<String, Object?> map) => MenuNav(
-    id: map['id'] as int,
-    iconName: map['icon_name'] as String,
-    menuName: map['menu_name'] as String,
-    menuUrl: map['menu_url'] as String,
-    oredering: map['oredering'] as int,
-  );
-
-  Map<String, Object?> toMap() => {
-    if (id != null) 'id': id,
-    'icon_name': iconName,
-    'menu_name': menuName,
-    'menu_url': menuUrl,
-    'oredering': oredering,
-  };
+  /// Đóng database; lần gọi [database] sau sẽ mở lại từ file.
+  @visibleForTesting
+  static Future<void> close() async {
+    final opening = _database;
+    _database = null;
+    if (opening == null) return;
+    try {
+      await (await opening).close();
+    } catch (_) {
+      /* Database chưa mở được thì không cần đóng. */
+    }
+  }
 }

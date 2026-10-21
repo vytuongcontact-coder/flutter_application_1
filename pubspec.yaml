@@ -57,6 +57,15 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
   webview_flutter_platform_interface: ^2.15.1
+  sqflite_common_ffi: ^2.4.4
+
+# sqflite_common_ffi (chỉ dùng cho test SQLite) kéo theo package sqlite3. Mặc định
+# build hook của sqlite3 đóng gói libsqlite3.so vào APK; dùng SQLite của hệ điều
+# hành để APK không chứa thư viện thừa. App vẫn dùng sqflite như trước.
+hooks:
+  user_defines:
+    sqlite3:
+      source: system
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

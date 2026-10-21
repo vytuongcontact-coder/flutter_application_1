@@ -1,44 +1,39 @@
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
-import '../helpers/DBUtils.dart';
+import '../controllers/menu_sync_controller.dart';
+import '../models/menu_nav.dart';
 
-class AppDrawer extends StatefulWidget {
-  const AppDrawer({
-    super.key,
-    required this.onSelected,
-    this.loadMenus = DBUtils.getMenus,
-  });
+class AppDrawer extends StatelessWidget {
+  const AppDrawer({super.key, required this.menu, required this.onSelected});
 
+  /// Nguồn dữ liệu: cache SQLite và kết quả đồng bộ GET /api/menu.
+  final MenuSyncController menu;
   final ValueChanged<MenuNav> onSelected;
-  final Future<List<MenuNav>> Function() loadMenus;
 
-  @override
-  State<AppDrawer> createState() => _AppDrawerState();
-}
-
-class _AppDrawerState extends State<AppDrawer> {
-  late Future<List<MenuNav>> _menus;
-
+  // icon_name từ API → icon Font Awesome. Giữ cả tên cũ của menu mẫu version 1.
   static const _icons = {
     'newspaper': FontAwesomeIcons.newspaper,
     'calendarDays': FontAwesomeIcons.calendarDays,
-    'graduationCap': FontAwesomeIcons.graduationCap,
-    'idBadge': FontAwesomeIcons.idBadge,
+    'chartLine': FontAwesomeIcons.chartLine,
+    'faceSmile': FontAwesomeIcons.faceSmile,
     'calendarWeek': FontAwesomeIcons.calendarWeek,
-    'filePen': FontAwesomeIcons.filePen,
+    'fileLines': FontAwesomeIcons.fileLines,
     'heartPulse': FontAwesomeIcons.heartPulse,
     'leaf': FontAwesomeIcons.leaf,
-    'headset': FontAwesomeIcons.headset,
+    'phone': FontAwesomeIcons.phone,
     'coins': FontAwesomeIcons.coins,
+    'circleCheck': FontAwesomeIcons.circleCheck,
+    'graduationCap': FontAwesomeIcons.graduationCap,
+    'idBadge': FontAwesomeIcons.idBadge,
+    'filePen': FontAwesomeIcons.filePen,
+    'headset': FontAwesomeIcons.headset,
     'clipboardCheck': FontAwesomeIcons.clipboardCheck,
   };
 
-  @override
-  void initState() {
-    super.initState();
-    _menus = widget.loadMenus();
-  }
+  /// Icon chưa hỗ trợ thì dùng dấu hỏi thay vì báo lỗi.
+  static FaIconData iconFor(String iconName) =>
+      _icons[iconName] ?? FontAwesomeIcons.circleQuestion;
 
   @override
   Widget build(BuildContext context) {
@@ -62,72 +57,96 @@ class _AppDrawerState extends State<AppDrawer> {
                 ),
               ),
             ),
-            FutureBuilder<List<MenuNav>>(
-              future: _menus,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState != ConnectionState.done) {
-                  return const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(24),
-                      child: CircularProgressIndicator(),
-                    ),
-                  );
-                }
-                if (snapshot.hasError) {
-                  return Column(
-                    children: [
-                      const Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Text('Không thể tải menu. Vui lòng thử lại.'),
-                      ),
-                      TextButton(
-                        onPressed: () => setState(() {
-                          _menus = widget.loadMenus();
-                        }),
-                        child: const Text('Thử lại'),
-                      ),
-                    ],
-                  );
-                }
-                return Column(
-                  children: [
-                    for (final menu in snapshot.data!)
-                      ListTile(
-                        tileColor: Colors.white,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 4,
-                        ),
-                        leading: SizedBox(
-                          width: 28,
-                          child: Center(
-                            child: FaIcon(
-                              _icons[menu.iconName] ??
-                                  FontAwesomeIcons.circleQuestion,
-                              size: 22,
-                              color: const Color(0xFF005A68),
-                            ),
-                          ),
-                        ),
-                        title: Text(
-                          menu.menuName,
-                          style: const TextStyle(
-                            color: Colors.black87,
-                            fontSize: 16,
-                          ),
-                        ),
-                        onTap: () {
-                          Scaffold.of(context).closeDrawer();
-                          widget.onSelected(menu);
-                        },
-                      ),
-                  ],
-                );
-              },
+            ListenableBuilder(
+              listenable: menu,
+              builder: (context, _) => _buildMenus(context),
             ),
           ],
         ),
       ),
     );
   }
+
+  Widget _buildMenus(BuildContext context) {
+    final items = menu.menus;
+    if (items.isEmpty) {
+      final waiting =
+          (!menu.cacheLoaded && menu.cacheError == null) || menu.syncing;
+      if (waiting) {
+        return const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: CircularProgressIndicator(),
+          ),
+        );
+      }
+      if (menu.cacheError != null && !menu.cacheLoaded) {
+        return _message(menu.cacheError!, onRetry: menu.loadCache);
+      }
+      return _message(
+        menu.syncError ??
+            (menu.hasSynced
+                ? 'Hiện chưa có mục menu nào.'
+                : menu.canSync
+                ? 'Chưa có dữ liệu menu.'
+                : 'Chưa có dữ liệu menu. Vui lòng kết nối Internet và đăng nhập để đồng bộ.'),
+        onRetry: menu.canSync ? menu.sync : null,
+      );
+    }
+    return Column(
+      children: [
+        for (final item in items)
+          ListTile(
+            tileColor: Colors.white,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 20,
+              vertical: 4,
+            ),
+            leading: SizedBox(
+              width: 28,
+              child: Center(
+                child: FaIcon(
+                  iconFor(item.iconName),
+                  size: 22,
+                  color: const Color(0xFF005A68),
+                ),
+              ),
+            ),
+            title: Text(
+              item.menuName,
+              style: const TextStyle(color: Colors.black87, fontSize: 16),
+            ),
+            onTap: () {
+              Scaffold.of(context).closeDrawer();
+              onSelected(item);
+            },
+          ),
+        // Có cache nhưng đồng bộ lỗi (mất mạng, server tạm ngừng...).
+        if (menu.syncError != null && menu.canSync)
+          _message(
+            'Chưa đồng bộ được menu. Đang hiển thị dữ liệu đã lưu.',
+            onRetry: menu.sync,
+            small: true,
+          ),
+      ],
+    );
+  }
+
+  Widget _message(String text, {VoidCallback? onRetry, bool small = false}) =>
+      Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              text,
+              textAlign: TextAlign.center,
+              style: small
+                  ? TextStyle(fontSize: 13, color: Colors.grey.shade700)
+                  : null,
+            ),
+          ),
+          if (onRetry != null)
+            TextButton(onPressed: onRetry, child: const Text('Thử lại')),
+        ],
+      );
 }

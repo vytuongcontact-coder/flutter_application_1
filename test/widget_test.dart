@@ -66,10 +66,11 @@ void main() {
       final scaffold = tester.widget<Scaffold>(find.byType(Scaffold));
       (scaffold.drawer! as AppDrawer).onSelected(
         const MenuNav(
+          id: 1,
           iconName: 'newspaper',
           menuName: 'Tin tức UEH',
           menuUrl: HomeScreen.websiteUrl,
-          oredering: 1,
+          ordering: 0,
         ),
       );
       await tester.pumpAndSettle();
@@ -222,10 +223,11 @@ void main() {
       final scaffold = tester.widget<Scaffold>(find.byType(Scaffold));
       (scaffold.drawer! as AppDrawer).onSelected(
         const MenuNav(
+          id: 1,
           iconName: 'newspaper',
           menuName: 'Tin tức UEH',
           menuUrl: HomeScreen.websiteUrl,
-          oredering: 1,
+          ordering: 0,
         ),
       );
       await tester.pumpAndSettle();

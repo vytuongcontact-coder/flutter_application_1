@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../models/menu_nav.dart';
 import '../models/student_profile.dart';
 import 'token_store.dart';
 
@@ -147,6 +148,14 @@ class StudentApi {
     String method,
     String path, {
     Map<String, dynamic>? body,
+  }) async => _decode(await _authorizedResponse(method, path, body: body));
+
+  // Gửi request có Bearer token; gặp 401 thì refresh một lần rồi gửi lại một lần.
+  // Trả response thô để mỗi endpoint tự decode object hay array.
+  Future<http.Response> _authorizedResponse(
+    String method,
+    String path, {
+    Map<String, dynamic>? body,
   }) async {
     final generation = _generation;
     final token = _tokens?.access;
@@ -187,7 +196,7 @@ class StudentApi {
         );
       }
     }
-    return _decode(response);
+    return response;
   }
 
   Future<StudentProfile> studentInfo() async {
@@ -197,6 +206,22 @@ class StudentApi {
     } on FormatException {
       throw const ApiException(
         'Thông tin sinh viên trả về chưa đầy đủ. Vui lòng thử lại.',
+      );
+    }
+  }
+
+  /// GET /api/menu: server trả về MẢNG JSON, đã sắp theo `ordering`.
+  Future<List<MenuNav>> menu() async {
+    final json = _decodeList(await _authorizedResponse('GET', '/api/menu'));
+    try {
+      final menus = [for (final item in json) MenuNav.fromJson(item)];
+      if (menus.map((menu) => menu.id).toSet().length != menus.length) {
+        throw const FormatException('Trùng id menu.');
+      }
+      return menus;
+    } on FormatException {
+      throw const ApiException(
+        'Dữ liệu menu trả về không hợp lệ. Vui lòng thử lại.',
       );
     }
   }
@@ -246,20 +271,31 @@ class StudentApi {
     }
   }
 
+  // Login, refresh, student-info, attendance: body phải là JSON object.
   Map<String, dynamic> _decode(http.Response response) {
-    Map<String, dynamic> data = {};
+    final value = _decodeJson(response);
+    if (value is Map<String, dynamic> && value.isNotEmpty) return value;
+    throw const ApiException('Máy chủ trả về dữ liệu không hợp lệ.');
+  }
+
+  // Menu: body phải là JSON array (được phép rỗng).
+  List<dynamic> _decodeList(http.Response response) {
+    final value = _decodeJson(response);
+    if (value is List<dynamic>) return value;
+    throw const ApiException('Máy chủ trả về dữ liệu không hợp lệ.');
+  }
+
+  // Response 2xx: trả JSON đã parse (object, array hoặc null nếu không phải JSON).
+  // Response lỗi: ném ApiException với message của server.
+  Object? _decodeJson(http.Response response) {
+    Object? value;
     try {
-      final value = jsonDecode(utf8.decode(response.bodyBytes));
-      if (value is Map<String, dynamic>) data = value;
+      value = jsonDecode(utf8.decode(response.bodyBytes));
     } catch (_) {
       /* Handle empty 401 and non-JSON gateway responses below. */
     }
-    if (response.statusCode >= 200 && response.statusCode < 300) {
-      if (data.isEmpty) {
-        throw const ApiException('Máy chủ trả về dữ liệu không hợp lệ.');
-      }
-      return data;
-    }
+    if (response.statusCode >= 200 && response.statusCode < 300) return value;
+    final data = value is Map<String, dynamic> ? value : const <String, dynamic>{};
     final message = data['message'];
     final errors = data['errors'];
     throw ApiException(
