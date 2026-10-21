@@ -75,6 +75,7 @@ class FeaturedNewsContent extends StatefulWidget {
     required this.api,
     this.onSelected,
     this.onCategorySelected,
+    this.onMore,
   });
 
   final NewsApi api;
@@ -85,6 +86,10 @@ class FeaturedNewsContent extends StatefulWidget {
   /// Chọn một chuyên mục ở khu vực "Danh mục tin tức" cuối trang.
   /// null thì không hiện khu vực này.
   final ValueChanged<NewsCategory>? onCategorySelected;
+
+  /// Bấm "Xem thêm" dưới 4 tin nhỏ: mở danh sách tin tổng hợp (không mở bài).
+  /// null thì không hiện nút.
+  final VoidCallback? onMore;
 
   @override
   State<FeaturedNewsContent> createState() => _FeaturedNewsContentState();
@@ -172,6 +177,11 @@ class _FeaturedNewsContentState extends State<FeaturedNewsContent> {
                 for (final item in news.others) ...[
                   const SizedBox(height: 20),
                   NewsTile(item: item, onTap: _tap(item)),
+                ],
+                if (widget.onMore != null) ...[
+                  const SizedBox(height: 32),
+                  Center(child: _MoreButton(onPressed: widget.onMore!)),
+                  const SizedBox(height: 16),
                 ],
                 if (widget.onCategorySelected != null) ...[
                   const SizedBox(height: 28),
@@ -296,6 +306,26 @@ class NewsTile extends StatelessWidget {
         ],
       ),
     ),
+  );
+}
+
+/// Nút "Xem thêm" (nền xám nhạt, chữ cam) như UEH Student gốc.
+class _MoreButton extends StatelessWidget {
+  const _MoreButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => TextButton(
+    onPressed: onPressed,
+    style: TextButton.styleFrom(
+      backgroundColor: const Color(0xFFE8E8E8),
+      foregroundColor: _newsOrange,
+      shape: const RoundedRectangleBorder(),
+      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 8),
+      textStyle: const TextStyle(fontSize: 24, fontWeight: FontWeight.w500),
+    ),
+    child: const Text('Xem thêm'),
   );
 }
 

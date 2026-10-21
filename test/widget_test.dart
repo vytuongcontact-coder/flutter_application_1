@@ -20,6 +20,7 @@ import 'package:flutter_application_1/widgets/account_screen.dart';
 import 'package:flutter_application_1/widgets/attendance_screen.dart';
 import 'package:flutter_application_1/widgets/app_bottom_bar.dart';
 import 'package:flutter_application_1/widgets/app_drawer.dart';
+import 'package:flutter_application_1/widgets/all_news.dart';
 import 'package:flutter_application_1/widgets/app_top_bar.dart';
 import 'package:flutter_application_1/widgets/category_news.dart';
 import 'package:flutter_application_1/widgets/featured_news.dart';
@@ -47,14 +48,18 @@ const _feedHtml = '''
 </div></section>
 ''';
 
-/// Một tin giả của chuyên mục [cat] (uid = cat * 1000 + vị trí).
+/// Một tin giả của chuyên mục [cat] (uid = cat * 1000 + vị trí). Tin càng sau
+/// càng cũ; cùng vị trí thì mục 222 mới nhất, để 4 mục xen kẽ khi ghép.
 Map<String, Object?> _categoryItem(int uid) => {
   'uid': uid,
   'cat_uid': uid ~/ 1000,
   'category_name': 'Mục ${uid ~/ 1000}',
   'title': 'Tin $uid',
   'short_desc': '',
-  'post_date': '2026-10-13T08:54:00',
+  'post_date': DateTime(2026, 10, 13, 8)
+      .subtract(Duration(hours: uid % 1000))
+      .add(Duration(minutes: uid ~/ 1000 - 219))
+      .toIso8601String(),
   'sdgs': [4],
   'is_featured': false,
   'background_img': null,
@@ -540,25 +545,37 @@ void main() {
       expect(platform.createdControllers, 0);
     }, variant: android);
 
-    Future<void> openCategory(WidgetTester tester, String name) async {
-      final link = find.descendant(
-        of: find.byType(NewsCategoryLinks),
-        matching: find.text(name.toUpperCase()),
-      );
-      await tester.ensureVisible(link);
+    Future<void> openMore(WidgetTester tester) async {
+      final more = find.text('Xem thêm');
+      await tester.ensureVisible(more);
       await tester.pumpAndSettle();
-      await tester.tap(link);
+      await tester.tap(more);
       await tester.pumpAndSettle();
     }
 
-    testWidgets('Chuyên mục: mở từ Trang chủ, Back về Trang chủ, không thoát app', (
+    // Trang chủ → Xem thêm → chạm tên chuyên mục trên thẻ của danh sách tổng hợp.
+    Future<void> openCategory(WidgetTester tester, int catUid) async {
+      await openMore(tester);
+      final label = find
+          .descendant(
+            of: find.byType(AllNewsContent),
+            matching: find.text('MỤC $catUid'),
+          )
+          .first;
+      await tester.ensureVisible(label);
+      await tester.pumpAndSettle();
+      await tester.tap(label);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('Chuyên mục (từ danh sách tổng hợp): Back về danh sách, rồi về Trang chủ, không thoát app', (
       tester,
     ) async {
-      await pumpHome(tester);
+      await pumpHome(tester, categoryTotal: 2);
       final featuredRequests = newsRequests
           .where((u) => u.path == '/api/news/featured')
           .length;
-      await openCategory(tester, 'Khoa học - Góc nhìn chuyên gia');
+      await openCategory(tester, 220);
       expect(find.byType(CategoryNewsContent), findsOneWidget);
       expect(title(tester), 'Khoa học - Góc nhìn chuyên gia');
       expect(newsRequests.last.queryParameters['cat_uid'], '220');
@@ -567,6 +584,12 @@ void main() {
 
       await back(tester);
       expect(find.byType(CategoryNewsContent), findsNothing);
+      expect(find.byType(AllNewsContent), findsOneWidget);
+      expect(title(tester), 'Trang chủ');
+      expect(canPop(tester), isFalse);
+
+      await back(tester);
+      expect(find.byType(AllNewsContent), findsNothing);
       expect(find.byType(FeaturedNewsContent), findsOneWidget);
       expect(title(tester), 'Trang chủ');
       expect(exitRequests, 0);
@@ -581,8 +604,8 @@ void main() {
     testWidgets('Chuyên mục: Drawer mở + Back chỉ đóng Drawer; tab Trang chủ về Trang chủ', (
       tester,
     ) async {
-      await pumpHome(tester);
-      await openCategory(tester, 'Báo chí nói về UEH');
+      await pumpHome(tester, categoryTotal: 2);
+      await openCategory(tester, 221);
       await openDrawer(tester);
       await back(tester);
       expect(drawerOpen(tester), isFalse);
@@ -640,13 +663,20 @@ void main() {
       tester,
     ) async {
       await pumpHome(tester, categoryTotal: 45);
-      final link = find.descendant(
-        of: find.byType(NewsCategoryLinks),
-        matching: find.text('KHOA HỌC - GÓC NHÌN CHUYÊN GIA'),
-      );
-      await tester.ensureVisible(link);
+      final more = find.text('Xem thêm');
+      await tester.ensureVisible(more);
       await frames(tester);
-      await tester.tap(link);
+      await tester.tap(more);
+      await frames(tester);
+      final label = find
+          .descendant(
+            of: find.byType(AllNewsContent),
+            matching: find.text('MỤC 220'),
+          )
+          .first;
+      await tester.ensureVisible(label);
+      await frames(tester);
+      await tester.tap(label);
       await frames(tester);
       final list = find.descendant(
         of: find.byType(CategoryNewsContent),
@@ -687,6 +717,102 @@ void main() {
       expect(
         newsRequests.where((u) => u.path == '/api/news').length,
         categoryRequests,
+      );
+      expect(exitRequests, 0);
+    }, variant: android);
+
+    testWidgets('Xem thêm: Trang chủ không còn 4 ô danh mục; mở danh sách tổng hợp, không gọi API chi tiết; Back về Trang chủ', (
+      tester,
+    ) async {
+      await pumpHome(tester, categoryTotal: 2);
+      expect(find.byType(NewsCategoryLinks), findsNothing);
+      expect(find.byType(FeaturedNewsCard), findsOneWidget);
+      expect(find.byType(NewsTile), findsNWidgets(4));
+      final before = newsRequests.length;
+      final featuredRequests = newsRequests
+          .where((u) => u.path == '/api/news/featured')
+          .length;
+
+      await openMore(tester);
+      expect(find.byType(AllNewsContent), findsOneWidget);
+      expect(find.text('Tin tức nổi bật'), findsOneWidget);
+      expect(title(tester), 'Trang chủ');
+      final opened = newsRequests.skip(before).toList();
+      // Chỉ gọi danh sách theo 4 chuyên mục, không gọi /api/news/{uid}.
+      expect(opened.every((u) => u.path == '/api/news'), isTrue);
+      expect(
+        opened.map((u) => u.queryParameters['cat_uid']).toSet(),
+        {'219', '220', '221', '222'},
+      );
+      expect(find.byType(NewsDetailContent), findsNothing);
+      expect(
+        tester.state<AllNewsContentState>(find.byType(AllNewsContent)).items,
+        hasLength(8),
+      );
+      expect(canPop(tester), isFalse);
+
+      await openDrawer(tester); // Drawer mở + Back chỉ đóng Drawer
+      await back(tester);
+      expect(drawerOpen(tester), isFalse);
+      expect(find.byType(AllNewsContent), findsOneWidget);
+
+      await back(tester);
+      expect(find.byType(AllNewsContent), findsNothing);
+      expect(find.byType(FeaturedNewsContent), findsOneWidget);
+      expect(exitRequests, 0);
+      expect(
+        newsRequests.where((u) => u.path == '/api/news/featured').length,
+        featuredRequests, // Trang chủ không tải lại
+      );
+    }, variant: android);
+
+    testWidgets('Danh sách tổng hợp: lazy load, mở chi tiết, Back giữ tin đã tải và vị trí cuộn', (
+      tester,
+    ) async {
+      await pumpHome(tester, categoryTotal: 45);
+      final more = find.text('Xem thêm');
+      await tester.ensureVisible(more);
+      await frames(tester);
+      await tester.tap(more);
+      await frames(tester);
+      AllNewsContentState feed() =>
+          tester.state<AllNewsContentState>(find.byType(AllNewsContent));
+      expect(feed().items, hasLength(10));
+      final list = find.descendant(
+        of: find.byType(AllNewsContent),
+        matching: find.byType(Scrollable),
+      );
+      await tester.drag(list, const Offset(0, -100000)); // đợt 2
+      await frames(tester);
+      expect(feed().items, hasLength(20));
+      await tester.drag(list, const Offset(0, 900));
+      await frames(tester);
+      final pixels = tester.state<ScrollableState>(list).position.pixels;
+      final listRequests = newsRequests
+          .where((u) => u.path == '/api/news')
+          .length;
+
+      final card = find
+          .descendant(
+            of: find.byType(AllNewsContent),
+            matching: find.byType(NewsPreviewCard),
+          )
+          .hitTestable()
+          .first;
+      final uid = tester.widget<NewsPreviewCard>(card).item.uid;
+      await tester.tap(card);
+      await frames(tester);
+      expect(newsRequests.last.path, '/api/news/$uid');
+      expect(find.text('Nội dung bài $uid'), findsOneWidget);
+
+      await back(tester);
+      await frames(tester);
+      expect(find.byType(NewsDetailContent), findsNothing);
+      expect(feed().items, hasLength(20));
+      expect(tester.state<ScrollableState>(list).position.pixels, pixels);
+      expect(
+        newsRequests.where((u) => u.path == '/api/news').length,
+        listRequests,
       );
       expect(exitRequests, 0);
     }, variant: android);
