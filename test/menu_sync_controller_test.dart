@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:flutter_application_1/controllers/menu_sync_controller.dart';
+import 'package:flutter_application_1/models/menu_nav.dart';
 import 'package:flutter_application_1/services/student_api.dart';
 
 import 'menu_fixtures.dart';
@@ -161,6 +162,94 @@ void main() {
     expect(controller.menus, seedMenus);
     expect(controller.hasSynced, isFalse);
     expect(controller.syncError, 'Không thể lưu menu vào máy. Vui lòng thử lại.');
+  });
+
+  group('Đăng xuất trong lúc đang ghi SQLite', () {
+    // Phiên B nhận menu khác phiên A để biết dữ liệu cuối cùng thuộc phiên nào.
+    final menuJsonB = [
+      for (final m in menuJson)
+        m['id'] == 3 ? {...m, 'menu_name': 'Xem điểm (phiên B)'} : m,
+    ];
+    final menusB = menuJsonB.map(MenuNav.fromJson).toList();
+
+    // Phiên A dùng access-1; đăng nhập lại (phiên B) nhận access-2.
+    Future<StudentApi> twoSessions() => _api((request) async {
+      if (request.url.path == '/api/login') return jsonResponse(tokens('2'));
+      return request.headers['Authorization'] == 'Bearer access-2'
+          ? jsonResponse(menuJsonB)
+          : jsonResponse(menuJson);
+    });
+
+    test('Lần ghi muộn của phiên A không đè cache của phiên B', () async {
+      final api = await twoSessions();
+      final gateA = Completer<void>();
+      var writesStarted = 0;
+      final store = MemoryMenuStore(seedMenus)
+        ..beforeWrite = () => ++writesStarted == 1 ? gateA.future : Future.value();
+      final controller = _controller(api, store);
+
+      final syncA = controller.sync();
+      await pumpEventQueue();
+      expect(writesStarted, 1); // phiên A đang ghi dở
+
+      await api.logout();
+      controller.cancelSync();
+      await api.login('sinh-vien-b', 'mat-khau-gia');
+      final syncB = controller.sync();
+      await pumpEventQueue();
+
+      gateA.complete(); // lần ghi của phiên A xong sau cùng
+      await Future.wait([syncA, syncB]);
+      expect(store.menus, menusB);
+      expect(controller.menus, menusB);
+      expect(controller.syncError, isNull);
+    });
+
+    test('Lượt ghi đang chờ của phiên đã đăng xuất bị bỏ qua', () async {
+      final api = await twoSessions();
+      final gateA = Completer<void>();
+      var writesStarted = 0;
+      final store = MemoryMenuStore(seedMenus)
+        ..beforeWrite = () => ++writesStarted == 1 ? gateA.future : Future.value();
+      final controller = _controller(api, store);
+
+      final syncA = controller.sync();
+      await pumpEventQueue();
+      await api.logout();
+      controller.cancelSync();
+      await api.login('sinh-vien-b', 'mat-khau-gia');
+      final syncB = controller.sync();
+      await pumpEventQueue();
+      // Phiên B cũng đăng xuất trước khi tới lượt ghi của mình.
+      await api.logout();
+      controller.cancelSync();
+
+      gateA.complete();
+      await Future.wait([syncA, syncB]);
+      expect(writesStarted, 1); // lượt ghi của phiên B không chạy
+      expect(store.menus, apiMenus); // chỉ lần ghi đã bắt đầu của A hoàn tất
+      expect(controller.menus, seedMenus); // UI không nhận kết quả phiên cũ
+      expect(controller.syncing, isFalse);
+    });
+
+    test('Một lần ghi lỗi không làm kẹt hàng đợi; phiên mới vẫn ghi được', () async {
+      final api = await twoSessions();
+      final store = MemoryMenuStore(seedMenus)..writeError = StateError('disk');
+      final controller = _controller(api, store);
+
+      await controller.sync(); // phiên A: ghi lỗi
+      expect(controller.syncError, 'Không thể lưu menu vào máy. Vui lòng thử lại.');
+      expect(store.menus, seedMenus);
+
+      store.writeError = null;
+      await api.logout();
+      controller.cancelSync();
+      await api.login('sinh-vien-b', 'mat-khau-gia');
+      await controller.sync(); // phiên B: hàng đợi vẫn chạy tiếp
+      expect(store.menus, menusB);
+      expect(controller.menus, menusB);
+      expect(controller.syncError, isNull);
+    });
   });
 
   test('Lỗi lạ khi gọi API: báo lỗi đồng bộ, không nhầm thành lỗi lưu trữ', () async {

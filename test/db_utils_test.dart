@@ -146,6 +146,19 @@ void main() {
     expect(await DBUtils.getMenuSyncedAt(), t0);
   });
 
+  test('Hai lần ghi chồng nhau được SQLite thực hiện đúng thứ tự gọi', () async {
+    await DBUtils.database;
+    // Không await lần ghi đầu: mô phỏng phiên cũ đang ghi thì phiên mới ghi tiếp.
+    final older = DBUtils.replaceMenus(seedMenus, syncedAt: t0);
+    final newer = DBUtils.replaceMenus(
+      apiMenus,
+      syncedAt: t0.add(const Duration(minutes: 1)),
+    );
+    expect(await Future.wait([older, newer]), [true, true]);
+    expect(await DBUtils.getMenus(), apiMenus);
+    expect(await DBUtils.getMenuSyncedAt(), t0.add(const Duration(minutes: 1)));
+  });
+
   test('Trùng ordering thì sắp tiếp theo id', () async {
     await DBUtils.replaceMenus(const [
       MenuNav(id: 3, iconName: 'leaf', menuName: 'C', menuUrl: '', ordering: 0),

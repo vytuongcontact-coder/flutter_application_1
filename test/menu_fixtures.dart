@@ -50,6 +50,10 @@ class MemoryMenuStore implements MenuStore {
   Object? writeError;
   Completer<void>? readGate;
 
+  /// Chạy đầu mỗi lần ghi; trả về Future chưa xong để giữ lần ghi đó lại.
+  /// Dữ liệu chỉ được ghi khi Future này xong (mô phỏng ghi chậm).
+  Future<void> Function()? beforeWrite;
+
   @override
   Future<List<MenuNav>> read() async {
     reads++;
@@ -63,6 +67,7 @@ class MemoryMenuStore implements MenuStore {
 
   @override
   Future<bool> replace(List<MenuNav> next, {required DateTime syncedAt}) async {
+    if (beforeWrite != null) await beforeWrite!();
     if (writeError != null) throw writeError!;
     writes++;
     final sorted = [...next]..sort(MenuNav.compare);

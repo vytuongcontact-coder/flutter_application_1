@@ -44,6 +44,8 @@ class MenuSyncController extends ChangeNotifier {
   int _epoch = 0;
   // Tăng khi menu lấy từ server: kết quả đọc cache cũ hơn không được ghi đè.
   int _revision = 0;
+  // Các lần ghi SQLite chạy lần lượt theo thứ tự gọi.
+  Future<void> _writeQueue = Future.value();
   bool _disposed = false;
 
   bool get hasSynced => syncedAt != null;
@@ -113,16 +115,16 @@ class MenuSyncController extends ChangeNotifier {
       if (epoch != _epoch) return;
       final at = _now();
       // Ghi SQLite trước; chỉ cập nhật UI khi lưu thành công.
-      final bool changed;
+      final bool? changed;
       try {
-        changed = await store.replace(remote, syncedAt: at);
+        changed = await _replace(remote, at, epoch);
       } catch (_) {
         if (epoch == _epoch) {
           syncError = 'Không thể lưu menu vào máy. Vui lòng thử lại.';
         }
         return;
       }
-      if (epoch != _epoch) return;
+      if (changed == null || epoch != _epoch) return;
       _revision++;
       menus = List.unmodifiable(<MenuNav>[...remote]..sort(MenuNav.compare));
       syncedAt = at;
@@ -141,6 +143,21 @@ class MenuSyncController extends ChangeNotifier {
         _notify();
       }
     }
+  }
+
+  // Xếp hàng lần ghi để lần ghi của phiên cũ (nếu đang dở) luôn xong trước lần
+  // ghi của phiên mới, không phụ thuộc MenuStore có tự xếp hàng hay không.
+  // Tới lượt mà phiên đã kết thúc thì bỏ qua, trả về null.
+  Future<bool?> _replace(List<MenuNav> remote, DateTime at, int epoch) {
+    final result = _writeQueue.then<bool?>((_) async {
+      if (epoch != _epoch) return null;
+      return store.replace(remote, syncedAt: at);
+    });
+    _writeQueue = result.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return result;
   }
 
   /// Gọi khi phiên đăng nhập kết thúc (đăng xuất hoặc hết hạn).
