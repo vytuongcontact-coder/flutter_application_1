@@ -392,7 +392,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // Đã bấm "Xem thêm": đang ở danh sách tin tổng hợp (Trang chủ › Tin tức nổi bật).
   bool _showMore = false;
   int _moreRevision = 0;
-  // Chuyên mục đang mở (chạm tên chuyên mục trên thẻ của danh sách tổng hợp).
+  // Chuyên mục đang mở (chạm thẻ tin nhỏ ở Trang chủ, hoặc tên chuyên mục trên
+  // thẻ của danh sách tổng hợp).
   NewsCategory? _category;
   int _categoryRevision = 0;
   // Bài đang xem chi tiết; null là đang ở danh sách (Trang chủ hoặc chuyên mục).
@@ -655,7 +656,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           // Chi tiết tin: về màn hình nguồn (chuyên mục nếu mở từ chuyên mục).
           setState(() => _article = null);
         } else if (_category != null) {
-          // Danh sách chuyên mục: về màn hình trước (danh sách tổng hợp).
+          // Danh sách chuyên mục: về màn hình đã mở nó (Trang chủ hoặc danh
+          // sách tổng hợp, tuỳ _showMore).
           setState(() => _category = null);
         } else if (_showMore) {
           // Danh sách tổng hợp: về Trang chủ (giữ nguyên tin đã tải).
@@ -739,6 +741,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       key: ValueKey(_featuredRevision),
                       api: _newsApi,
                       onSelected: _openArticle,
+                      onCategorySelected: _openCategory,
                       onMore: _openMore,
                     ),
                     !_showMore
@@ -760,6 +763,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             api: _newsApi,
                             category: _category!,
                             onSelected: _openArticle,
+                            onHome: () =>
+                                _onBottomMenuSelected(BottomMenu.home),
                           ),
                     _article == null
                         ? const SizedBox.shrink()

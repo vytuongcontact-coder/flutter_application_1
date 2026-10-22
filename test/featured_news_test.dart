@@ -396,40 +396,73 @@ void main() {
     );
   });
 
-  testWidgets('Khu vực Danh mục tin tức: 4 chuyên mục, chọn đúng chuyên mục', (
-    tester,
-  ) async {
-    final news = _FakeNews(
-      featured: [for (var i = 0; i < 5; i++) _item(80 + i, 219 + (i % 4))],
-    );
-    await _pump(tester, news.api);
-    expect(find.byType(NewsCategoryLinks), findsNothing); // không có callback
+  testWidgets(
+    'Thẻ tin nhỏ mở danh sách chuyên mục (có mũi tên), không mở bài; tin lớn vẫn mở bài',
+    (tester) async {
+      // Tin 84 thuộc chuyên mục ngoài 219-222: thẻ của nó vẫn mở bài.
+      final news = _FakeNews(
+        featured: [
+          for (final (uid, cat) in [
+            (80, 219),
+            (81, 220),
+            (82, 221),
+            (83, 222),
+            (84, 300),
+          ])
+            _item(uid, cat),
+        ],
+      );
+      await _pump(tester, news.api);
+      // Không truyền onCategorySelected: không có mũi tên chuyên mục.
+      expect(find.byIcon(Icons.chevron_right), findsNothing);
 
-    NewsCategory? chosen;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: FeaturedNewsContent(
-            api: news.api,
-            onCategorySelected: (category) => chosen = category,
+      NewsCategory? chosen;
+      NewsItem? selected;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: FeaturedNewsContent(
+              api: news.api,
+              onSelected: (item) => selected = item,
+              onCategorySelected: (category) => chosen = category,
+            ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.byType(FeaturedNewsCard), findsOneWidget);
-    expect(find.byType(NewsTile), findsNWidgets(4));
-    for (final category in NewsCategory.all) {
-      final link = find.descendant(
-        of: find.byType(NewsCategoryLinks),
-        matching: find.text(category.name.toUpperCase()),
       );
-      await tester.ensureVisible(link);
       await tester.pumpAndSettle();
-      await tester.tap(link);
-      expect(chosen?.uid, category.uid);
-    }
-  });
+      expect(find.byType(NewsTile), findsNWidgets(4));
+      expect(find.byIcon(Icons.chevron_right), findsNWidgets(3));
+      final requests = news.requests.length;
+
+      for (final cat in [220, 221, 222]) {
+        final tile = find.byWidgetPredicate(
+          (w) => w is NewsTile && w.item.catUid == cat,
+        );
+        expect(tester.widget<NewsTile>(tile).opensCategory, isTrue);
+        await tester.ensureVisible(tile);
+        await tester.pumpAndSettle();
+        await tester.tap(tile);
+        expect(chosen?.uid, cat);
+        expect(selected, isNull);
+      }
+
+      final other = find.byWidgetPredicate(
+        (w) => w is NewsTile && w.item.uid == 84,
+      );
+      expect(tester.widget<NewsTile>(other).opensCategory, isFalse);
+      await tester.ensureVisible(other);
+      await tester.pumpAndSettle();
+      await tester.tap(other);
+      expect(selected?.uid, 84);
+
+      await tester.ensureVisible(find.byType(FeaturedNewsCard));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(FeaturedNewsCard));
+      expect(selected?.uid, 80);
+      // Chạm thẻ chỉ báo lên HomeScreen, không tự gọi thêm API.
+      expect(news.requests, hasLength(requests));
+    },
+  );
 
   test('Ngày đăng hiển thị dd/mm/yyyy', () {
     expect(formatNewsDate(DateTime(2026, 4, 1, 7)), '01/04/2026');

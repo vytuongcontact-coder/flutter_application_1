@@ -3,10 +3,11 @@ import 'package:flutter/material.dart';
 import '../models/news.dart';
 import '../services/news_api.dart';
 import '../services/student_api.dart' show ApiException;
+import 'all_news.dart' show NewsBreadcrumb, NewsPreviewCard;
 import 'app_top_bar.dart';
-import 'featured_news.dart' show NewsTile;
 
-/// Danh sách tin của một chuyên mục, tải dần (lazy load) khi cuộn gần cuối.
+/// Danh sách tin của một chuyên mục ("Trang chủ › tên chuyên mục"), tải dần
+/// (lazy load) khi cuộn gần cuối.
 ///
 /// Mỗi lần gọi GET /api/news?cat_uid=&limit=20&offset=, offset bắt đầu từ 0
 /// và tăng theo [NewsPage.nextOffset]; ngừng khi [NewsPage.hasMore] là false.
@@ -16,6 +17,7 @@ class CategoryNewsContent extends StatefulWidget {
     required this.api,
     required this.category,
     this.onSelected,
+    this.onHome,
   });
 
   static const pageSize = 20;
@@ -28,6 +30,9 @@ class CategoryNewsContent extends StatefulWidget {
 
   /// Chạm vào một tin. null thì thẻ tin không nhận chạm (chưa có trang chi tiết).
   final ValueChanged<NewsItem>? onSelected;
+
+  /// Chạm "Trang chủ" ở breadcrumb.
+  final VoidCallback? onHome;
 
   @override
   State<CategoryNewsContent> createState() => CategoryNewsContentState();
@@ -174,20 +179,30 @@ class CategoryNewsContentState extends State<CategoryNewsContent> {
       color: Colors.white,
       child: RefreshIndicator(
         onRefresh: _reset,
-        child: ListView.separated(
+        child: ListView.builder(
           controller: _scroll,
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(22, 20, 22, 20),
-          // Thêm 1 dòng cuối: vòng tải, lỗi kèm Thử lại, hoặc báo đã hết tin.
-          itemCount: _items.length + 1,
-          separatorBuilder: (_, _) => const SizedBox(height: 20),
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+          // Dòng đầu: breadcrumb; dòng cuối: vòng tải, lỗi kèm Thử lại, hoặc
+          // báo đã hết tin.
+          itemCount: _items.length + 2,
           itemBuilder: (context, index) {
-            if (index == _items.length) return _footer();
-            final item = _items[index];
+            if (index == 0) {
+              return NewsBreadcrumb(
+                current: widget.category.name,
+                onHome: widget.onHome,
+              );
+            }
+            if (index == _items.length + 1) return _footer();
+            final item = _items[index - 1];
             final onSelected = widget.onSelected;
-            return NewsTile(
-              item: item,
-              onTap: onSelected == null ? null : () => onSelected(item),
+            // Đang ở chính chuyên mục này nên tên chuyên mục không nhận chạm.
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 20),
+              child: NewsPreviewCard(
+                item: item,
+                onTap: onSelected == null ? null : () => onSelected(item),
+              ),
             );
           },
         ),

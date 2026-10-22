@@ -15,6 +15,7 @@ import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/controllers/auth_controller.dart';
 import 'package:flutter_application_1/controllers/menu_sync_controller.dart';
 import 'package:flutter_application_1/helpers/DBUtils.dart';
+import 'package:flutter_application_1/models/news.dart';
 import 'package:flutter_application_1/services/student_api.dart';
 import 'package:flutter_application_1/widgets/account_screen.dart';
 import 'package:flutter_application_1/widgets/attendance_screen.dart';
@@ -626,7 +627,7 @@ void main() {
       }
     }
 
-    testWidgets('Chi tiết: chạm tin lớn, tin nhỏ gọi đúng uid; Back về Trang chủ', (
+    testWidgets('Chi tiết: chạm tin lớn gọi đúng uid; Back về Trang chủ', (
       tester,
     ) async {
       await pumpHome(tester);
@@ -641,22 +642,134 @@ void main() {
 
       await back(tester);
       expect(find.byType(NewsDetailContent), findsNothing);
+      expect(find.byType(FeaturedNewsContent), findsOneWidget);
       expect(title(tester), 'Trang chủ');
       expect(exitRequests, 0);
-
-      final tile = find.byType(NewsTile).first;
-      final uid = tester.widget<NewsTile>(tile).item.uid;
-      await tester.ensureVisible(tile);
-      await tester.pumpAndSettle();
-      await tester.tap(tile);
-      await tester.pumpAndSettle();
-      expect(newsRequests.last.path, '/api/news/$uid');
-      expect(find.text('Nội dung bài $uid'), findsOneWidget);
-      await back(tester);
-      expect(find.byType(NewsDetailContent), findsNothing);
-      expect(find.byType(FeaturedNewsContent), findsOneWidget);
-      expect(exitRequests, 0);
       expect(platform.createdControllers, 0); // không dùng WebView
+    }, variant: android);
+
+    // Thẻ tin nhỏ ở Trang chủ thuộc chuyên mục [catUid].
+    Finder homeTile(int catUid) => find.descendant(
+      of: find.byType(FeaturedNewsContent),
+      matching: find.byWidgetPredicate(
+        (w) => w is NewsTile && w.item.catUid == catUid,
+      ),
+    );
+
+    testWidgets('Trang chủ: mỗi thẻ tin nhỏ mở đúng danh sách chuyên mục 219-222, không mở bài; Back về Trang chủ', (
+      tester,
+    ) async {
+      await pumpHome(tester, categoryTotal: 2);
+      final featuredRequests = newsRequests
+          .where((u) => u.path == '/api/news/featured')
+          .length;
+      for (final category in NewsCategory.all) {
+        final before = newsRequests.length;
+        final tile = homeTile(category.uid);
+        expect(tile, findsOneWidget);
+        await tester.ensureVisible(tile);
+        await tester.pumpAndSettle();
+        await tester.tap(tile);
+        await tester.pumpAndSettle();
+        expect(find.byType(CategoryNewsContent), findsOneWidget);
+        expect(find.byType(NewsDetailContent), findsNothing);
+        expect(title(tester), category.name);
+        final opened = newsRequests.skip(before).toList();
+        expect(opened, hasLength(1));
+        expect(opened.single.path, '/api/news');
+        expect(opened.single.queryParameters['cat_uid'], '${category.uid}');
+
+        await back(tester);
+        expect(find.byType(CategoryNewsContent), findsNothing);
+        expect(find.byType(AllNewsContent), findsNothing);
+        expect(find.byType(FeaturedNewsContent), findsOneWidget);
+        expect(title(tester), 'Trang chủ');
+        expect(canPop(tester), isTrue);
+      }
+      expect(exitRequests, 0);
+      // Trang chủ được giữ nguyên, không tải lại tin nổi bật.
+      expect(
+        newsRequests.where((u) => u.path == '/api/news/featured').length,
+        featuredRequests,
+      );
+    }, variant: android);
+
+    testWidgets('Trang chủ → Cuộc sống UEH: chỉ gọi cat_uid=219, lazy load offset 20, 40; chạm bài mới gọi chi tiết; Back giữ tin và vị trí cuộn', (
+      tester,
+    ) async {
+      await pumpHome(tester, categoryTotal: 45);
+      final before = newsRequests.length;
+      final tile = homeTile(219);
+      await tester.ensureVisible(tile);
+      await frames(tester);
+      await tester.tap(tile);
+      await frames(tester);
+      expect(title(tester), 'Cuộc sống UEH');
+      final category = find.byType(CategoryNewsContent);
+      expect(
+        find.descendant(of: category, matching: find.text('Trang chủ')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: category, matching: find.text('Cuộc sống UEH')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: category, matching: find.byType(NewsPreviewCard)),
+        findsWidgets,
+      );
+      List<String> calls() => [
+        for (final u in newsRequests.skip(before))
+          u.path == '/api/news'
+              ? '${u.queryParameters['cat_uid']}@${u.queryParameters['offset']}'
+              : u.path,
+      ];
+      // Chỉ mục 219, trang đầu offset 0; chưa gọi API chi tiết.
+      expect(calls(), ['219@0']);
+
+      final list = find.descendant(
+        of: category,
+        matching: find.byType(Scrollable),
+      );
+      CategoryNewsContentState state() =>
+          tester.state<CategoryNewsContentState>(category);
+      await tester.drag(list, const Offset(0, -100000));
+      await frames(tester);
+      expect(calls(), ['219@0', '219@20']);
+      await tester.drag(list, const Offset(0, -100000));
+      await frames(tester);
+      expect(calls(), ['219@0', '219@20', '219@40']);
+      expect(state().items, hasLength(45));
+      expect(state().hasMore, isFalse);
+      expect({for (final item in state().items) item.catUid}, {219});
+      await tester.drag(list, const Offset(0, 1500)); // lùi lên một đoạn
+      await frames(tester);
+      final pixels = tester.state<ScrollableState>(list).position.pixels;
+
+      final card = find
+          .descendant(of: category, matching: find.byType(NewsPreviewCard))
+          .hitTestable()
+          .first;
+      final uid = tester.widget<NewsPreviewCard>(card).item.uid;
+      await tester.tap(card);
+      await frames(tester);
+      expect(calls().last, '/api/news/$uid');
+      expect(find.text('Nội dung bài $uid'), findsOneWidget);
+      final afterDetail = calls().length;
+
+      await back(tester);
+      await frames(tester);
+      expect(find.byType(NewsDetailContent), findsNothing);
+      expect(title(tester), 'Cuộc sống UEH');
+      expect(state().items, hasLength(45)); // không tải lại từ offset 0
+      expect(tester.state<ScrollableState>(list).position.pixels, pixels);
+      expect(calls(), hasLength(afterDetail));
+
+      await back(tester);
+      expect(find.byType(CategoryNewsContent), findsNothing);
+      expect(find.byType(FeaturedNewsContent), findsOneWidget);
+      expect(title(tester), 'Trang chủ');
+      expect(exitRequests, 0);
     }, variant: android);
 
     testWidgets('Chi tiết từ chuyên mục: Back về đúng chuyên mục, giữ tin đã tải và vị trí cuộn', (
@@ -697,11 +810,11 @@ void main() {
       final tile = find
           .descendant(
             of: find.byType(CategoryNewsContent),
-            matching: find.byType(NewsTile),
+            matching: find.byType(NewsPreviewCard),
           )
           .hitTestable()
           .first;
-      final uid = tester.widget<NewsTile>(tile).item.uid;
+      final uid = tester.widget<NewsPreviewCard>(tile).item.uid;
       expect(uid ~/ 1000, 220);
       await tester.tap(tile);
       await frames(tester);
@@ -725,7 +838,7 @@ void main() {
       tester,
     ) async {
       await pumpHome(tester, categoryTotal: 2);
-      expect(find.byType(NewsCategoryLinks), findsNothing);
+      expect(find.text('Danh mục tin tức'), findsNothing);
       expect(find.byType(FeaturedNewsCard), findsOneWidget);
       expect(find.byType(NewsTile), findsNWidgets(4));
       final before = newsRequests.length;

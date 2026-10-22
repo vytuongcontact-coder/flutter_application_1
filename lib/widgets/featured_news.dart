@@ -83,8 +83,8 @@ class FeaturedNewsContent extends StatefulWidget {
   /// Chạm vào một tin. null thì thẻ tin không nhận chạm (chưa có trang chi tiết).
   final ValueChanged<NewsItem>? onSelected;
 
-  /// Chọn một chuyên mục ở khu vực "Danh mục tin tức" cuối trang.
-  /// null thì không hiện khu vực này.
+  /// Chạm thẻ tin nhỏ: mở danh sách chuyên mục của tin đó (không mở bài).
+  /// null, hoặc tin không thuộc 4 chuyên mục, thì thẻ nhỏ mở bài như tin lớn.
   final ValueChanged<NewsCategory>? onCategorySelected;
 
   /// Bấm "Xem thêm" dưới 4 tin nhỏ: mở danh sách tin tổng hợp (không mở bài).
@@ -176,16 +176,12 @@ class _FeaturedNewsContentState extends State<FeaturedNewsContent> {
                 FeaturedNewsCard(item: news.main!, onTap: _tap(news.main!)),
                 for (final item in news.others) ...[
                   const SizedBox(height: 20),
-                  NewsTile(item: item, onTap: _tap(item)),
+                  _tile(item),
                 ],
                 if (widget.onMore != null) ...[
                   const SizedBox(height: 32),
                   Center(child: _MoreButton(onPressed: widget.onMore!)),
                   const SizedBox(height: 16),
-                ],
-                if (widget.onCategorySelected != null) ...[
-                  const SizedBox(height: 28),
-                  NewsCategoryLinks(onSelected: widget.onCategorySelected!),
                 ],
                 const SizedBox(height: 8),
               ],
@@ -199,6 +195,22 @@ class _FeaturedNewsContentState extends State<FeaturedNewsContent> {
   VoidCallback? _tap(NewsItem item) {
     final onSelected = widget.onSelected;
     return onSelected == null ? null : () => onSelected(item);
+  }
+
+  // Thẻ nhỏ đại diện cho chuyên mục của tin: cả thẻ là vùng chạm mở danh sách.
+  Widget _tile(NewsItem item) {
+    final onCategory = widget.onCategorySelected;
+    final category = NewsCategory.all
+        .where((c) => c.uid == item.catUid)
+        .firstOrNull;
+    if (onCategory == null || category == null) {
+      return NewsTile(item: item, onTap: _tap(item));
+    }
+    return NewsTile(
+      item: item,
+      opensCategory: true,
+      onTap: () => onCategory(category),
+    );
   }
 }
 
@@ -265,10 +277,18 @@ class FeaturedNewsCard extends StatelessWidget {
 
 /// Tin nhỏ: thẻ trắng xếp dọc gồm tên chuyên mục, hàng icon SDG và tiêu đề.
 class NewsTile extends StatelessWidget {
-  const NewsTile({super.key, required this.item, this.onTap});
+  const NewsTile({
+    super.key,
+    required this.item,
+    this.onTap,
+    this.opensCategory = false,
+  });
 
   final NewsItem item;
   final VoidCallback? onTap;
+
+  /// Chạm thẻ mở danh sách chuyên mục: hiện mũi tên cạnh tên chuyên mục.
+  final bool opensCategory;
 
   @override
   Widget build(BuildContext context) => _Card(
@@ -278,14 +298,26 @@ class NewsTile extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            item.categoryName.toUpperCase(),
-            style: const TextStyle(
-              color: _categoryBlue,
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-              height: 1.4,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  item.categoryName.toUpperCase(),
+                  style: const TextStyle(
+                    color: _categoryBlue,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+              if (opensCategory)
+                const Icon(
+                  Icons.chevron_right,
+                  color: _categoryBlue,
+                  semanticLabel: 'Xem danh sách chuyên mục',
+                ),
+            ],
           ),
           if (item.sdgs.isNotEmpty) ...[
             const SizedBox(height: 8),
@@ -326,53 +358,6 @@ class _MoreButton extends StatelessWidget {
       textStyle: const TextStyle(fontSize: 24, fontWeight: FontWeight.w500),
     ),
     child: const Text('Xem thêm'),
-  );
-}
-
-/// Khu vực "Danh mục tin tức": 4 chuyên mục lấy từ [NewsCategory.all].
-class NewsCategoryLinks extends StatelessWidget {
-  const NewsCategoryLinks({super.key, required this.onSelected});
-
-  final ValueChanged<NewsCategory> onSelected;
-
-  @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      const Text(
-        'Danh mục tin tức',
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          color: _newsOrange,
-          fontSize: 24,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-      for (final category in NewsCategory.all) ...[
-        const SizedBox(height: 12),
-        _Card(
-          onTap: () => onSelected(category),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    category.name.toUpperCase(),
-                    style: const TextStyle(
-                      color: _categoryBlue,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                const Icon(Icons.chevron_right, color: _categoryBlue),
-              ],
-            ),
-          ),
-        ),
-      ],
-    ],
   );
 }
 

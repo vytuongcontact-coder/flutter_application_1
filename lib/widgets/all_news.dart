@@ -252,7 +252,12 @@ class AllNewsContentState extends State<AllNewsContent> {
           // Dòng đầu: breadcrumb; dòng cuối: vòng tải, lỗi, hoặc báo hết tin.
           itemCount: _items.length + 2,
           itemBuilder: (context, index) {
-            if (index == 0) return _Breadcrumb(onHome: widget.onHome);
+            if (index == 0) {
+              return NewsBreadcrumb(
+                current: 'Tin tức nổi bật',
+                onHome: widget.onHome,
+              );
+            }
             if (index == _items.length + 1) return _footer();
             final item = _items[index - 1];
             final category = NewsCategory.all
@@ -300,9 +305,11 @@ class AllNewsContentState extends State<AllNewsContent> {
   }
 }
 
-class _Breadcrumb extends StatelessWidget {
-  const _Breadcrumb({this.onHome});
+/// Đường dẫn "Trang chủ › [current]" ở đầu danh sách tin.
+class NewsBreadcrumb extends StatelessWidget {
+  const NewsBreadcrumb({super.key, required this.current, this.onHome});
 
+  final String current;
   final VoidCallback? onHome;
 
   @override
@@ -318,9 +325,11 @@ class _Breadcrumb extends StatelessWidget {
           ),
         ),
         const Icon(Icons.chevron_right, color: Color(0xFFBDBDBD), size: 20),
-        const Text(
-          'Tin tức nổi bật',
-          style: TextStyle(color: AppTopBar.uehBlue, fontSize: 18),
+        Flexible(
+          child: Text(
+            current,
+            style: const TextStyle(color: AppTopBar.uehBlue, fontSize: 18),
+          ),
         ),
       ],
     ),

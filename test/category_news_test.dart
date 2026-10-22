@@ -9,8 +9,8 @@ import 'package:http/testing.dart';
 
 import 'package:flutter_application_1/models/news.dart';
 import 'package:flutter_application_1/services/news_api.dart';
+import 'package:flutter_application_1/widgets/all_news.dart';
 import 'package:flutter_application_1/widgets/category_news.dart';
-import 'package:flutter_application_1/widgets/featured_news.dart';
 
 /// Server giả cho GET /api/news: mỗi chuyên mục có [total] tin, uid =
 /// cat_uid * 1000 + vị trí. Trả đúng lát cắt theo limit/offset như API thật.
@@ -109,7 +109,7 @@ void main() {
     expect(server.requests.single, (cat: 219, limit: 20, offset: 0));
     expect(_state(tester).items, hasLength(20));
     expect(_state(tester).hasMore, isTrue);
-    expect(find.byType(NewsTile), findsWidgets);
+    expect(find.byType(NewsPreviewCard), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 
@@ -240,6 +240,10 @@ void main() {
       expect(state.nextOffset, 20); // chưa tăng offset
       expect(state.hasMore, isTrue);
       expect(state.error, 'Không thể tải tin tức. Vui lòng thử lại.');
+      // Thẻ tin cao: kéo tiếp tới dòng cuối để dòng lỗi được dựng (đang lỗi
+      // nên cuộn không gọi API).
+      await _scrollToEnd(tester);
+      expect(server.offsets, [0, 20]);
       expect(
         find.text('Không thể tải tin tức. Vui lòng thử lại.'),
         findsOneWidget,
@@ -266,7 +270,7 @@ void main() {
     await tester.pumpWidget(_app(server.api, _life));
     await _settle(tester);
     expect(find.text('Thử lại'), findsOneWidget);
-    expect(find.byType(NewsTile), findsNothing);
+    expect(find.byType(NewsPreviewCard), findsNothing);
     await tester.tap(find.text('Thử lại'));
     await _settle(tester);
     expect(_state(tester).items, hasLength(20));
