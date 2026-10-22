@@ -8,7 +8,7 @@
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <application
         android:allowBackup="false"
-        android:label="flutter_application_1"
+        android:label="UEH Student"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -38,6 +38,13 @@
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="ueh_student_notifications" />
+        <!-- Icon và màu của thông báo FCM khi app chạy nền (Android tự hiển thị). -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_ueh" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/ueh_blue" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

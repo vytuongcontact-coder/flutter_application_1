@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show Color;
 
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
@@ -16,6 +17,11 @@ const notificationChannel = AndroidNotificationChannel(
   description: 'Thông báo gửi từ Firebase Cloud Messaging',
   importance: Importance.high,
 );
+
+/// Icon nhỏ của thông báo (android/app/src/main/res/drawable/ic_stat_ueh.xml)
+/// và màu xanh UEH; cùng icon, màu với thông báo FCM khi app chạy nền.
+const notificationIcon = 'ic_stat_ueh';
+const notificationColor = Color(0xFF005A68);
 
 /// Nhận tin FCM khi app chạy nền hoặc đã đóng và lưu vào lịch sử SQLite.
 /// Chạy trong isolate riêng: không có BuildContext, không gọi setState; DBUtils
@@ -186,7 +192,7 @@ class FlutterLocalNotifier implements LocalNotifier {
   Future<void> init({required void Function(String? payload) onTap}) async {
     await _plugin.initialize(
       settings: const InitializationSettings(
-        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+        android: AndroidInitializationSettings(notificationIcon),
         // Quyền thông báo xin qua FirebaseMessaging, không xin lúc khởi tạo.
         iOS: DarwinInitializationSettings(
           requestAlertPermission: false,
@@ -221,6 +227,8 @@ class FlutterLocalNotifier implements LocalNotifier {
         channelDescription: notificationChannel.description,
         importance: Importance.high,
         priority: Priority.high,
+        icon: notificationIcon,
+        color: notificationColor,
       ),
     ),
   );

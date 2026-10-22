@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Màu xanh UEH (#005A68), cùng màu AppBar: tô icon thông báo. -->
+    <color name="ueh_blue">#FF005A68</color>
+    <!-- Nền của icon app (adaptive icon, Android 8+). -->
+    <color name="ic_launcher_background">#FFFFFFFF</color>
+</resources>

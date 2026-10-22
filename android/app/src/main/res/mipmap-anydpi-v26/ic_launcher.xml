@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Icon app cho Android 8+ (adaptive icon): nền trắng, logo UEH ở lớp trước,
+     nằm trong vùng an toàn để launcher bo tròn/vuông không cắt logo.
+     Android 7 trở xuống dùng mipmap-*/ic_launcher.png. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>
