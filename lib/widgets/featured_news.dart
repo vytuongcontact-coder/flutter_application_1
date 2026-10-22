@@ -23,10 +23,11 @@ class FeaturedNews {
 /// Tải tin nổi bật từ GET /api/news/featured rồi chọn 1 tin lớn, 4 tin nhỏ.
 ///
 /// - Tin lớn: tin đầu tiên có `is_featured = true`; không có thì tin đầu tiên.
-/// - Tin nhỏ: các tin còn lại, không trùng uid.
-/// - Chưa đủ 4 tin nhỏ: với mỗi chuyên mục (219 → 222) chưa có tin nhỏ, lấy
-///   tin mới nhất khác uid đã dùng từ GET /api/news?cat_uid=. Chỉ gọi khi thiếu;
-///   gọi lỗi thì bỏ qua và hiển thị số tin đang có.
+/// - Tin nhỏ: mỗi chuyên mục 219 → 222 một tin đại diện, theo thứ tự đó. Ưu
+///   tiên tin đầu tiên của featured thuộc chuyên mục (khác tin lớn); chuyên mục
+///   chưa có thì lấy tin mới nhất chưa dùng từ GET /api/news?cat_uid=. Chỉ gọi
+///   cho chuyên mục còn thiếu; gọi lỗi hoặc không còn tin thì chuyên mục đó
+///   không có thẻ (không tạo tin giả). Tin thuộc chuyên mục khác bị bỏ qua.
 Future<FeaturedNews> loadFeaturedNews(NewsApi api, {int smallCount = 4}) async {
   final items = await api.featured();
   final used = <int>{};
@@ -40,14 +41,16 @@ Future<FeaturedNews> loadFeaturedNews(NewsApi api, {int smallCount = 4}) async {
     (item) => item.isFeatured,
     orElse: () => unique.first,
   );
-  final others = [
-    for (final item in unique)
-      if (item.uid != main.uid) item,
-  ].take(smallCount).toList();
-
+  final others = <NewsItem>[];
   for (final category in NewsCategory.all) {
     if (others.length >= smallCount) break;
-    if (others.any((item) => item.catUid == category.uid)) continue;
+    final fromFeatured = unique
+        .where((item) => item.uid != main.uid && item.catUid == category.uid)
+        .firstOrNull;
+    if (fromFeatured != null) {
+      others.add(fromFeatured);
+      continue;
+    }
     try {
       final page = await api.category(category.uid, limit: 5);
       final extra = page.items.where((item) => !used.contains(item.uid));
@@ -58,14 +61,7 @@ Future<FeaturedNews> loadFeaturedNews(NewsApi api, {int smallCount = 4}) async {
       // Tin bổ sung không bắt buộc: lỗi thì vẫn hiển thị các tin đã có.
     }
   }
-  // Giữ thứ tự chuyên mục 219 → 222 như API featured; chuyên mục khác để cuối.
-  final known = {for (final category in NewsCategory.all) category.uid};
-  final ordered = [
-    for (final category in NewsCategory.all)
-      ...others.where((item) => item.catUid == category.uid),
-    ...others.where((item) => !known.contains(item.catUid)),
-  ];
-  return FeaturedNews(main: main, others: ordered);
+  return FeaturedNews(main: main, others: others);
 }
 
 /// Trang chủ: tin nổi bật lấy từ News REST API, hiển thị bằng widget Flutter.
@@ -75,7 +71,6 @@ class FeaturedNewsContent extends StatefulWidget {
     required this.api,
     this.onSelected,
     this.onCategorySelected,
-    this.onMore,
   });
 
   final NewsApi api;
@@ -86,10 +81,6 @@ class FeaturedNewsContent extends StatefulWidget {
   /// Chạm thẻ tin nhỏ: mở danh sách chuyên mục của tin đó (không mở bài).
   /// null, hoặc tin không thuộc 4 chuyên mục, thì thẻ nhỏ mở bài như tin lớn.
   final ValueChanged<NewsCategory>? onCategorySelected;
-
-  /// Bấm "Xem thêm" dưới 4 tin nhỏ: mở danh sách tin tổng hợp (không mở bài).
-  /// null thì không hiện nút.
-  final VoidCallback? onMore;
 
   @override
   State<FeaturedNewsContent> createState() => _FeaturedNewsContentState();
@@ -177,11 +168,6 @@ class _FeaturedNewsContentState extends State<FeaturedNewsContent> {
                 for (final item in news.others) ...[
                   const SizedBox(height: 20),
                   _tile(item),
-                ],
-                if (widget.onMore != null) ...[
-                  const SizedBox(height: 32),
-                  Center(child: _MoreButton(onPressed: widget.onMore!)),
-                  const SizedBox(height: 16),
                 ],
                 const SizedBox(height: 8),
               ],
@@ -338,26 +324,6 @@ class NewsTile extends StatelessWidget {
         ],
       ),
     ),
-  );
-}
-
-/// Nút "Xem thêm" (nền xám nhạt, chữ cam) như UEH Student gốc.
-class _MoreButton extends StatelessWidget {
-  const _MoreButton({required this.onPressed});
-
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) => TextButton(
-    onPressed: onPressed,
-    style: TextButton.styleFrom(
-      backgroundColor: const Color(0xFFE8E8E8),
-      foregroundColor: _newsOrange,
-      shape: const RoundedRectangleBorder(),
-      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 8),
-      textStyle: const TextStyle(fontSize: 24, fontWeight: FontWeight.w500),
-    ),
-    child: const Text('Xem thêm'),
   );
 }
 

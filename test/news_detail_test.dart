@@ -199,7 +199,16 @@ void main() {
         final detail = NewsDetail.fromJson(jsonDecode(detail304Json));
         expect(find.text(detail.item.title), findsOneWidget); // tiêu đề từ API
         expect(find.text('Tin 304 ở danh sách'), findsNothing);
-        expect(find.text('TUYỂN SINH & HƯỚNG NGHIỆP'), findsOneWidget);
+        // Breadcrumb theo category_name của API chi tiết (thẻ danh sách ghi
+        // chuyên mục khác); không lặp thêm dòng chuyên mục in hoa.
+        expect(find.text('Trang chủ'), findsOneWidget);
+        expect(find.text('Tuyển sinh & Hướng nghiệp'), findsOneWidget);
+        expect(find.text('Khoa học - Góc nhìn chuyên gia'), findsNothing);
+        expect(find.text('TUYỂN SINH & HƯỚNG NGHIỆP'), findsNothing);
+        expect(
+          tester.getTopLeft(find.text('Tuyển sinh & Hướng nghiệp')).dy,
+          lessThan(tester.getTopLeft(find.text(detail.item.title)).dy),
+        );
         expect(find.text('01/04/2026'), findsOneWidget);
         final sdgAssets = tester
             .widgetList<Image>(find.byType(Image))

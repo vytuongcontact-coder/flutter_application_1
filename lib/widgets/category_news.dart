@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import '../models/news.dart';
 import '../services/news_api.dart';
 import '../services/student_api.dart' show ApiException;
-import 'all_news.dart' show NewsBreadcrumb, NewsPreviewCard;
 import 'app_top_bar.dart';
+import 'news_preview.dart';
 
 /// Danh sách tin của một chuyên mục ("Trang chủ › tên chuyên mục"), tải dần
 /// (lazy load) khi cuộn gần cuối.
@@ -196,7 +196,6 @@ class CategoryNewsContentState extends State<CategoryNewsContent> {
             if (index == _items.length + 1) return _footer();
             final item = _items[index - 1];
             final onSelected = widget.onSelected;
-            // Đang ở chính chuyên mục này nên tên chuyên mục không nhận chạm.
             return Padding(
               padding: const EdgeInsets.only(bottom: 20),
               child: NewsPreviewCard(

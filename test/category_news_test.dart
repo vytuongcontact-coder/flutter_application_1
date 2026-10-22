@@ -9,8 +9,8 @@ import 'package:http/testing.dart';
 
 import 'package:flutter_application_1/models/news.dart';
 import 'package:flutter_application_1/services/news_api.dart';
-import 'package:flutter_application_1/widgets/all_news.dart';
 import 'package:flutter_application_1/widgets/category_news.dart';
+import 'package:flutter_application_1/widgets/news_preview.dart';
 
 /// Server giả cho GET /api/news: mỗi chuyên mục có [total] tin, uid =
 /// cat_uid * 1000 + vị trí. Trả đúng lát cắt theo limit/offset như API thật.

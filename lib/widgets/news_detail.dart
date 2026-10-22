@@ -7,19 +7,27 @@ import '../services/news_api.dart';
 import '../services/student_api.dart' show ApiException;
 import 'app_top_bar.dart';
 import 'featured_news.dart' show SdgIcons, formatNewsDate;
+import 'news_preview.dart' show NewsBreadcrumb;
 
-const _categoryBlue = Color(0xFF11443F);
 const _bodyStyle = TextStyle(fontSize: 17, height: 1.5, color: Colors.black87);
 
 /// Trang chi tiết: GET /api/news/{uid}, nội dung HTML hiển thị bằng widget
 /// Flutter (không dùng WebView).
 class NewsDetailContent extends StatefulWidget {
-  const NewsDetailContent({super.key, required this.api, required this.item});
+  const NewsDetailContent({
+    super.key,
+    required this.api,
+    required this.item,
+    this.onHome,
+  });
 
   final NewsApi api;
 
   /// Tin được chọn ở danh sách; chỉ dùng [NewsItem.uid] để gọi API.
   final NewsItem item;
+
+  /// Chạm "Trang chủ" ở breadcrumb.
+  final VoidCallback? onHome;
 
   @override
   State<NewsDetailContent> createState() => _NewsDetailContentState();
@@ -81,15 +89,9 @@ class _NewsDetailContentState extends State<NewsDetailContent> {
           key: PageStorageKey('ueh-news-detail-${item.uid}'),
           padding: const EdgeInsets.fromLTRB(22, 20, 22, 28),
           children: [
-            Text(
-              item.categoryName.toUpperCase(),
-              style: const TextStyle(
-                color: _categoryBlue,
-                fontSize: 15,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 8),
+            // "Trang chủ › chuyên mục" theo category_name của API chi tiết;
+            // đã có tên chuyên mục ở đây nên không lặp lại dòng in hoa.
+            NewsBreadcrumb(current: item.categoryName, onHome: widget.onHome),
             Text(
               item.title,
               style: const TextStyle(

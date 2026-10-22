@@ -14,7 +14,6 @@ import '../controllers/auth_controller.dart';
 import '../controllers/menu_sync_controller.dart';
 import '../models/news.dart';
 import '../services/news_api.dart';
-import 'all_news.dart';
 import 'category_news.dart';
 import 'featured_news.dart';
 import 'news_detail.dart';
@@ -389,11 +388,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _featuredRevision = 0;
   // Trang web của mục menu có URL ngoài; null là đang ở Trang chủ (tin tức native).
   Uri? _webUri;
-  // Đã bấm "Xem thêm": đang ở danh sách tin tổng hợp (Trang chủ › Tin tức nổi bật).
-  bool _showMore = false;
-  int _moreRevision = 0;
-  // Chuyên mục đang mở (chạm thẻ tin nhỏ ở Trang chủ, hoặc tên chuyên mục trên
-  // thẻ của danh sách tổng hợp).
+  // Chuyên mục đang mở (chạm thẻ tin nhỏ ở Trang chủ).
   NewsCategory? _category;
   int _categoryRevision = 0;
   // Bài đang xem chi tiết; null là đang ở danh sách (Trang chủ hoặc chuyên mục).
@@ -497,7 +492,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _selectedMenu = BottomMenu.home;
         _pageTitle = menu.menuName;
         _webUri = null;
-        _showMore = false;
         _category = null;
         _article = null;
         _canGoBack = false;
@@ -510,7 +504,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _selectedMenu = BottomMenu.home;
         _pageTitle = menu.menuName;
         _webUri = uri;
-        _showMore = false;
         _category = null;
         _article = null;
         _canGoBack = false;
@@ -555,7 +548,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _selectedMenu = menu;
         _pageTitle = menu.title;
         _webUri = null;
-        _showMore = false;
         _category = null;
         _article = null;
         _canGoBack = false;
@@ -606,8 +598,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void handleCommitBackGesture() => _scaffoldKey.currentState?.closeDrawer();
 
-  void _openMore() => setState(() => _showMore = true);
-
   void _openCategory(NewsCategory category) =>
       setState(() => _category = category);
 
@@ -641,8 +631,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           !isStudentScreen &&
           _webUri == null &&
           _category == null &&
-          _article == null &&
-          !_showMore,
+          _article == null,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
         // Một lần Back khi Drawer mở chỉ đóng Drawer, không đổi tab/tin/WebView.
@@ -653,15 +642,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (isStudentScreen) {
           _onBottomMenuSelected(BottomMenu.home);
         } else if (_article != null) {
-          // Chi tiết tin: về màn hình nguồn (chuyên mục nếu mở từ chuyên mục).
+          // Chi tiết tin: về màn hình nguồn (chuyên mục nếu mở từ chuyên mục,
+          // Trang chủ nếu mở từ tin nổi bật lớn).
           setState(() => _article = null);
         } else if (_category != null) {
-          // Danh sách chuyên mục: về màn hình đã mở nó (Trang chủ hoặc danh
-          // sách tổng hợp, tuỳ _showMore).
+          // Danh sách chuyên mục: về Trang chủ (giữ nguyên tin nổi bật).
           setState(() => _category = null);
-        } else if (_showMore) {
-          // Danh sách tổng hợp: về Trang chủ (giữ nguyên tin đã tải).
-          setState(() => _showMore = false);
         } else if (_webUri != null) {
           // Trang web ngoài: lùi trong WebView nếu có lịch sử, hết thì về Trang chủ.
           _canGoBack && controller != null
@@ -706,8 +692,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         ? () => setState(() => _articleRevision++)
                         : _category != null
                         ? () => setState(() => _categoryRevision++)
-                        : _showMore
-                        ? () => setState(() => _moreRevision++)
                         : _webUri == null
                         ? () => setState(() => _featuredRevision++)
                         : controller == null
@@ -724,16 +708,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ? _buildAccount()
               : _webUri != null
               ? _buildWebContent(controller)
-              // Tin tức: 0 = Trang chủ, 1 = danh sách tổng hợp (Xem thêm),
-              // 2 = danh sách chuyên mục, 3 = chi tiết.
+              // Tin tức: 0 = Trang chủ, 1 = danh sách chuyên mục, 2 = chi tiết.
               // IndexedStack giữ màn hình nguồn (tin đã tải, vị trí cuộn) khi
               // đang xem chi tiết; mỗi màn hình luôn ở đúng vị trí của nó.
               : IndexedStack(
                   index: _article != null
-                      ? 3
-                      : _category != null
                       ? 2
-                      : _showMore
+                      : _category != null
                       ? 1
                       : 0,
                   children: [
@@ -742,18 +723,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       api: _newsApi,
                       onSelected: _openArticle,
                       onCategorySelected: _openCategory,
-                      onMore: _openMore,
                     ),
-                    !_showMore
-                        ? const SizedBox.shrink()
-                        : AllNewsContent(
-                            key: ValueKey(_moreRevision),
-                            api: _newsApi,
-                            onSelected: _openArticle,
-                            onCategorySelected: _openCategory,
-                            onHome: () =>
-                                _onBottomMenuSelected(BottomMenu.home),
-                          ),
                     _category == null
                         ? const SizedBox.shrink()
                         : CategoryNewsContent(
@@ -774,6 +744,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             ),
                             api: _newsApi,
                             item: _article!,
+                            onHome: () =>
+                                _onBottomMenuSelected(BottomMenu.home),
                           ),
                   ],
                 ),

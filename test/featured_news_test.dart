@@ -192,6 +192,38 @@ void main() {
       },
     );
 
+    test(
+      'Featured đủ 4 tin nhỏ nhưng trùng chuyên mục: mỗi mục một tin, chỉ gọi API cho mục còn thiếu',
+      () async {
+        final news = _FakeNews(
+          // 4 tin nhỏ nhưng chỉ thuộc 220, 221; thiếu 219 và 222.
+          featured: [
+            _item(90, 219, featured: true),
+            _item(91, 220),
+            _item(92, 220),
+            _item(93, 221),
+            _item(94, 221),
+          ],
+          categories: {
+            219: _page([_item(90, 219), _item(95, 219)]),
+            222: _page([_item(96, 222)]),
+          },
+        );
+        final result = await loadFeaturedNews(news.api);
+        expect(result.main!.uid, 90);
+        // Tin đầu tiên của featured cho 220, 221; 219 bỏ qua tin lớn (uid 90).
+        expect(result.others.map((i) => i.uid), [95, 91, 93, 96]);
+        expect(result.others.map((i) => i.catUid), [219, 220, 221, 222]);
+        expect(
+          news.categoryRequests.map((r) => r.url.queryParameters),
+          [
+            {'cat_uid': '219', 'limit': '5', 'offset': '0'},
+            {'cat_uid': '222', 'limit': '5', 'offset': '0'},
+          ],
+        );
+      },
+    );
+
     test('Gọi API chuyên mục lỗi: vẫn trả các tin đang có', () async {
       final news = _FakeNews(featured: _featuredReal)..categoryStatus = 500;
       final result = await loadFeaturedNews(news.api);
@@ -399,7 +431,8 @@ void main() {
   testWidgets(
     'Thẻ tin nhỏ mở danh sách chuyên mục (có mũi tên), không mở bài; tin lớn vẫn mở bài',
     (tester) async {
-      // Tin 84 thuộc chuyên mục ngoài 219-222: thẻ của nó vẫn mở bài.
+      // Tin 84 thuộc chuyên mục ngoài 219-222: không làm thẻ nhỏ. Mục 219 lấy
+      // từ API chuyên mục (tin 85).
       final news = _FakeNews(
         featured: [
           for (final (uid, cat) in [
@@ -411,10 +444,34 @@ void main() {
           ])
             _item(uid, cat),
         ],
+        categories: {
+          219: _page([_item(85, 219)]),
+        },
       );
       await _pump(tester, news.api);
       // Không truyền onCategorySelected: không có mũi tên chuyên mục.
       expect(find.byIcon(Icons.chevron_right), findsNothing);
+
+      // Chỉ có onSelected: thẻ nhỏ mở bài như trước.
+      NewsItem? opened;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: FeaturedNewsContent(
+              api: news.api,
+              onSelected: (item) => opened = item,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final first = find.byWidgetPredicate(
+        (w) => w is NewsTile && w.item.uid == 85,
+      );
+      await tester.ensureVisible(first);
+      await tester.pumpAndSettle();
+      await tester.tap(first);
+      expect(opened?.uid, 85);
 
       NewsCategory? chosen;
       NewsItem? selected;
@@ -431,10 +488,14 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byType(NewsTile), findsNWidgets(4));
-      expect(find.byIcon(Icons.chevron_right), findsNWidgets(3));
+      expect(find.byIcon(Icons.chevron_right), findsNWidgets(4));
+      expect(
+        find.byWidgetPredicate((w) => w is NewsTile && w.item.uid == 84),
+        findsNothing,
+      );
       final requests = news.requests.length;
 
-      for (final cat in [220, 221, 222]) {
+      for (final cat in [219, 220, 221, 222]) {
         final tile = find.byWidgetPredicate(
           (w) => w is NewsTile && w.item.catUid == cat,
         );
@@ -445,15 +506,6 @@ void main() {
         expect(chosen?.uid, cat);
         expect(selected, isNull);
       }
-
-      final other = find.byWidgetPredicate(
-        (w) => w is NewsTile && w.item.uid == 84,
-      );
-      expect(tester.widget<NewsTile>(other).opensCategory, isFalse);
-      await tester.ensureVisible(other);
-      await tester.pumpAndSettle();
-      await tester.tap(other);
-      expect(selected?.uid, 84);
 
       await tester.ensureVisible(find.byType(FeaturedNewsCard));
       await tester.pumpAndSettle();
