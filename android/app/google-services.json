@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "337146157550",
+    "project_id": "ueh-tudent",
+    "storage_bucket": "ueh-tudent.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:337146157550:android:497f3c82f099b8adf656ff",
+        "android_client_info": {
+          "package_name": "com.example.flutter_application_1"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDAs-bzdIPDp2SWNDMgLnW3RlTqxEwOvJE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

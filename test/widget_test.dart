@@ -27,11 +27,16 @@ import 'package:flutter_application_1/widgets/featured_news.dart';
 import 'package:flutter_application_1/widgets/home_screen.dart';
 import 'package:flutter_application_1/widgets/news_detail.dart';
 import 'package:flutter_application_1/widgets/news_preview.dart';
+import 'package:flutter_application_1/widgets/login_screen.dart';
+import 'package:flutter_application_1/widgets/notification_history.dart';
+import 'package:flutter_application_1/models/app_notification.dart';
+import 'package:flutter_application_1/services/notification_store.dart';
 import 'package:flutter_application_1/services/news_api.dart';
 import 'package:flutter_application_1/widgets/splash_screen.dart';
 
 import 'menu_fixtures.dart';
 import 'news_fixtures.dart';
+import 'notification_fakes.dart';
 import 'student_api_test.dart'
     show MemoryTokenStore, jsonResponse, tokens, profileJson;
 
@@ -367,6 +372,7 @@ void main() {
       WidgetTester tester, {
       bool loggedIn = false,
       int categoryTotal = 0,
+      NotificationHistory? notifications,
     }) async {
       frameworkHandlesBack = [];
       exitRequests = 0;
@@ -400,7 +406,12 @@ void main() {
         routes: [
           GoRoute(
             path: '/',
-            builder: (_, _) => HomeScreen(auth: auth, menu: menu, newsApi: news),
+            builder: (_, _) => HomeScreen(
+              auth: auth,
+              menu: menu,
+              newsApi: news,
+              notifications: notifications,
+            ),
           ),
         ],
       );
@@ -475,6 +486,113 @@ void main() {
 
       await back(tester); // Drawer đã đóng: giữ hành vi cũ ở Trang chủ
       expect(exitRequests, 1);
+      expect(tester.takeException(), isNull);
+    }, variant: android);
+
+    // Lịch sử thông báo giả với hai tin như bản ghi FCM thật trên emulator.
+    NotificationHistory fakeHistory() {
+      final store = MemoryNotificationStore();
+      final history = NotificationHistory(store);
+      addTearDown(history.dispose);
+      final t0 = DateTime(2026, 10, 22, 21, 54, 32);
+      store
+        ..save(
+          AppNotification(
+            messageId: 'fg',
+            title: 'UEH Student - SQLite Foreground',
+            body: 'Luu lich su khi ung dung dang mo',
+            receivedAt: t0,
+          ),
+        )
+        ..save(
+          AppNotification(
+            messageId: 'bg',
+            title: 'UEH Student - SQLite Background',
+            body: 'Luu lich su khi ung dung chay nen',
+            receivedAt: t0.add(const Duration(minutes: 1, seconds: 7)),
+          ),
+        );
+      return history;
+    }
+
+    Future<void> tapTab(WidgetTester tester, String label) async {
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AppBottomBar),
+          matching: find.text(label),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('Thông báo: chưa đăng nhập vẫn mở lịch sử SQLite; Back về Trang chủ, không thoát app', (
+      tester,
+    ) async {
+      final history = fakeHistory();
+      await pumpHome(tester, notifications: history);
+      await tapTab(tester, 'Thông báo');
+      expect(find.byType(NotificationHistoryView), findsOneWidget);
+      expect(find.byType(LoginScreen), findsNothing);
+      expect(title(tester), 'Thông báo');
+      expect(
+        tester.widget<AppBottomBar>(find.byType(AppBottomBar)).selectedMenu,
+        BottomMenu.notifications,
+      );
+      expect(find.textContaining('chưa khả dụng'), findsNothing);
+      expect(find.text('UEH Student - SQLite Background'), findsOneWidget);
+      expect(find.text('UEH Student - SQLite Foreground'), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.text('UEH Student - SQLite Background')).dy,
+        lessThan(
+          tester.getTopLeft(find.text('UEH Student - SQLite Foreground')).dy,
+        ),
+      );
+      expect(canPop(tester), isFalse);
+      expect(frameworkHandlesBack.last, isTrue);
+
+      // Tin mới lưu khi đang ở tab Thông báo: danh sách cập nhật.
+      await history.save(
+        AppNotification(
+          messageId: 'new',
+          title: 'UEH Student - Tin moi',
+          body: 'Cap nhat ngay',
+          receivedAt: DateTime(2026, 10, 22, 22),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('UEH Student - Tin moi'), findsOneWidget);
+
+      await back(tester);
+      expect(find.byType(NotificationHistoryView), findsNothing);
+      expect(find.byType(FeaturedNewsContent), findsOneWidget);
+      expect(title(tester), 'Trang chủ');
+      expect(canPop(tester), isTrue);
+      expect(exitRequests, 0);
+      expect(tester.takeException(), isNull);
+    }, variant: android);
+
+    testWidgets('Thông báo: Drawer mở + Back chỉ đóng Drawer; chuyển sang các tab khác bình thường', (
+      tester,
+    ) async {
+      await pumpHome(tester, loggedIn: true, notifications: fakeHistory());
+      await tapTab(tester, 'Thông báo');
+      await openDrawer(tester);
+      await back(tester);
+      expect(drawerOpen(tester), isFalse);
+      expect(find.byType(NotificationHistoryView), findsOneWidget);
+      expect(title(tester), 'Thông báo');
+
+      await tapTab(tester, 'Điểm danh');
+      expect(find.byType(AttendanceScreen), findsOneWidget);
+      expect(title(tester), 'Điểm danh');
+      await tapTab(tester, 'Thông báo');
+      expect(find.byType(NotificationHistoryView), findsOneWidget);
+      await tapTab(tester, 'Tài khoản');
+      expect(title(tester), 'Tài khoản');
+      await tapTab(tester, 'Trang chủ');
+      expect(find.byType(FeaturedNewsContent), findsOneWidget);
+      expect(title(tester), 'Trang chủ');
+      expect(exitRequests, 0);
       expect(tester.takeException(), isNull);
     }, variant: android);
 

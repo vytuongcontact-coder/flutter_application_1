@@ -14,6 +14,7 @@ import '../controllers/auth_controller.dart';
 import '../controllers/menu_sync_controller.dart';
 import '../models/news.dart';
 import '../services/news_api.dart';
+import '../services/notification_store.dart';
 import 'category_news.dart';
 import 'featured_news.dart';
 import 'news_detail.dart';
@@ -23,6 +24,7 @@ import 'app_bottom_bar.dart';
 import 'app_top_bar.dart';
 import 'attendance_screen.dart';
 import 'account_screen.dart';
+import 'notification_history.dart';
 
 const _newsOrange = Color(0xFFFF6F00);
 
@@ -355,7 +357,13 @@ class _NewsLoadError extends StatelessWidget {
 }
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, this.auth, this.menu, this.newsApi});
+  const HomeScreen({
+    super.key,
+    this.auth,
+    this.menu,
+    this.newsApi,
+    this.notifications,
+  });
 
   final AuthController? auth;
 
@@ -364,6 +372,10 @@ class HomeScreen extends StatefulWidget {
 
   /// Truyền vào khi test; mặc định gọi News REST API thật.
   final NewsApi? newsApi;
+
+  /// Truyền vào khi test; mặc định là lịch sử SQLite dùng chung với
+  /// NotificationService ([notificationHistory]).
+  final NotificationHistory? notifications;
 
   // Đổi URL tại đây hoặc dùng flutter run --dart-define=UEH_URL=https://...
   static const websiteUrl = DBUtils.newsUrl;
@@ -527,7 +539,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _onBottomMenuSelected(BottomMenu menu) {
-    if (menu == BottomMenu.attendance || menu == BottomMenu.account) {
+    // Thông báo đọc lịch sử lưu trên máy: không cần đăng nhập UEH.
+    if (menu == BottomMenu.notifications ||
+        menu == BottomMenu.attendance ||
+        menu == BottomMenu.account) {
       FocusScope.of(context).unfocus();
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
       setState(() {
@@ -554,13 +569,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       });
       return;
     }
-
-    // Gắn route khi các màn hình này được triển khai.
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(content: Text('${menu.title}: chức năng hiện chưa khả dụng.')),
-      );
   }
 
   Future<void> _load(Future<void> Function() action) async {
@@ -620,15 +628,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final controller = _controller;
+    final isNotifications = _selectedMenu == BottomMenu.notifications;
     final isAttendance = _selectedMenu == BottomMenu.attendance;
     final isAccount = _selectedMenu == BottomMenu.account;
-    final isStudentScreen = isAttendance || isAccount;
+    // Các tab ngoài Trang chủ: Back về Trang chủ, tiêu đề là tên tab.
+    final isTabScreen = isNotifications || isAttendance || isAccount;
     return PopScope(
       // Drawer mở thì chặn pop: canPop đổi giá trị nên Flutter báo lại cho
       // Android rằng app tự xử lý Back (predictive back, Android 16+).
       canPop:
           !_drawerOpen &&
-          !isStudentScreen &&
+          !isTabScreen &&
           _webUri == null &&
           _category == null &&
           _article == null,
@@ -639,7 +649,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _scaffoldKey.currentState?.closeDrawer();
           return;
         }
-        if (isStudentScreen) {
+        if (isTabScreen) {
           _onBottomMenuSelected(BottomMenu.home);
         } else if (_article != null) {
           // Chi tiết tin: về màn hình nguồn (chuyên mục nếu mở từ chuyên mục,
@@ -664,10 +674,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           if (open) _menu.syncIfStale();
         },
         appBar: AppTopBar(
-          title: isStudentScreen
+          title: isTabScreen
               ? _selectedMenu.title
               : _article?.categoryName ?? _category?.name ?? _pageTitle,
-          centerTitle: isStudentScreen ? true : null,
+          centerTitle: isTabScreen ? true : null,
           leading: Builder(
             builder: (context) => IconButton(
               tooltip: 'Mở menu',
@@ -683,7 +693,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     onPressed: _auth.busy ? null : _auth.logout,
                   ),
                 ]
-              : isAttendance || isAccount
+              : isTabScreen
               ? []
               : [
                   IconButton(
@@ -702,7 +712,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ],
         ),
         body: SafeArea(
-          child: isAttendance
+          child: isNotifications
+              ? NotificationHistoryView(
+                  history: widget.notifications ?? notificationHistory,
+                )
+              : isAttendance
               ? AttendanceScreen(api: _auth.api)
               : isAccount
               ? _buildAccount()

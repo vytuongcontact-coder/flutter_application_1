@@ -57,12 +57,12 @@ void main() {
     await dir.delete(recursive: true);
   });
 
-  test('Migration v1 → v2: giữ dữ liệu cũ, oredering → ordering', () async {
+  test('Migration v1 → v3: giữ dữ liệu cũ, oredering → ordering', () async {
     await _createVersion1(DBUtils.debugDatabasePath!);
     final menus = await DBUtils.getMenus();
     expect(menus, seedMenus);
     final db = await DBUtils.database;
-    expect(await db.getVersion(), 2);
+    expect(await db.getVersion(), 3); // bước v1→v2 rồi v2→v3
     final columns = (await db.rawQuery('PRAGMA table_info(menu_nav)'))
         .map((c) => c['name'])
         .toList();
@@ -74,7 +74,7 @@ void main() {
   test('Cài mới: không chèn menu mẫu, chưa có mốc đồng bộ', () async {
     expect(await DBUtils.getMenus(), isEmpty);
     expect(await DBUtils.getMenuSyncedAt(), isNull);
-    expect(await (await DBUtils.database).getVersion(), 2);
+    expect(await (await DBUtils.database).getVersion(), 3);
   });
 
   test('Đồng bộ lần đầu thay menu mẫu bằng 11 menu server theo id', () async {

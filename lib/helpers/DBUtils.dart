@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
 import 'package:sqflite/sqflite.dart';
 
+import '../models/app_notification.dart';
 import '../models/menu_nav.dart';
 
 // Giữ import cũ `helpers/DBUtils.dart` vẫn dùng được MenuNav.
@@ -17,9 +18,11 @@ class DBUtils {
 
   /// Version 1: bảng menu_nav dùng cột `oredering` (sai chính tả) và 11 menu mẫu.
   /// Version 2: cột `ordering`, id lấy từ server, thêm bảng app_meta.
-  static const databaseVersion = 2;
+  /// Version 3: thêm bảng notifications (lịch sử Firebase Cloud Messaging).
+  static const databaseVersion = 3;
   static const menuTable = 'menu_nav';
   static const metaTable = 'app_meta';
+  static const notificationTable = 'notifications';
   static const menuSyncedAtKey = 'menu_synced_at';
   static const newsUrl = String.fromEnvironment(
     'UEH_URL',
@@ -44,6 +47,7 @@ class DBUtils {
         onCreate: (db, version) async {
           await _createMenuTable(db, menuTable);
           await _createMetaTable(db);
+          await _createNotificationTable(db);
         },
         onUpgrade: _upgrade,
       );
@@ -72,6 +76,26 @@ class DBUtils {
         )
       ''');
 
+  // message_id UNIQUE: cùng một tin chỉ có một dòng dù được ghi từ nhiều
+  // callback (foreground, background isolate, chạm thông báo).
+  // received_at: mili-giây UTC (số nguyên) để ORDER BY sắp đúng thời gian.
+  static Future<void> _createNotificationTable(DatabaseExecutor db) async {
+    await db.execute('''
+        CREATE TABLE $notificationTable (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          message_id TEXT NOT NULL UNIQUE,
+          title TEXT NOT NULL,
+          body TEXT NOT NULL,
+          received_at INTEGER NOT NULL,
+          is_read INTEGER NOT NULL DEFAULT 0
+        )
+      ''');
+    await db.execute(
+      'CREATE INDEX idx_notifications_received_at '
+      'ON $notificationTable (received_at)',
+    );
+  }
+
   // sqflite đã chạy onUpgrade trong một transaction: lỗi ở bất kỳ bước nào thì
   // rollback toàn bộ và database giữ nguyên version cũ. Không mở transaction lồng.
   static Future<void> _upgrade(Database db, int oldVersion, int newVersion) async {
@@ -91,7 +115,11 @@ class DBUtils {
       // chưa phải dữ liệu đã đồng bộ từ server.
       await _createMetaTable(db);
     }
-    // Version sau: thêm `if (oldVersion < 3) { ... }` ở đây, không sửa bước cũ.
+    if (oldVersion < 3) {
+      // Chỉ thêm bảng mới; menu_nav và app_meta giữ nguyên.
+      await _createNotificationTable(db);
+    }
+    // Version sau: thêm `if (oldVersion < 4) { ... }` ở đây, không sửa bước cũ.
   }
 
   static Future<List<MenuNav>> getMenus() async {
@@ -142,6 +170,45 @@ class DBUtils {
       }, conflictAlgorithm: ConflictAlgorithm.replace);
       return changed;
     });
+  }
+
+  /// Lưu một thông báo; trả về false nếu message ID đã có (không ghi đè).
+  ///
+  /// INSERT OR IGNORE dựa trên ràng buộc UNIQUE nên an toàn khi nhiều lần ghi
+  /// cùng lúc, kể cả từ isolate nền (mỗi isolate một kết nối tới cùng file).
+  static Future<bool> insertNotification(AppNotification notification) async {
+    final db = await database;
+    return db.transaction((txn) async {
+      await txn.insert(
+        notificationTable,
+        notification.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+      final changes = await txn.rawQuery('SELECT changes() AS n');
+      return changes.single['n'] == 1;
+    });
+  }
+
+  /// Lịch sử thông báo, mới nhất trước.
+  static Future<List<AppNotification>> getNotifications() async {
+    final db = await database;
+    final rows = await db.query(
+      notificationTable,
+      orderBy: 'received_at DESC, id DESC',
+    );
+    return rows.map(AppNotification.fromMap).toList();
+  }
+
+  /// Đánh dấu đã đọc; trả về false nếu không có thông báo này.
+  static Future<bool> markNotificationRead(String messageId) async {
+    final db = await database;
+    final count = await db.update(
+      notificationTable,
+      {'is_read': 1},
+      where: 'message_id = ?',
+      whereArgs: [messageId],
+    );
+    return count > 0;
   }
 
   /// Đóng database; lần gọi [database] sau sẽ mở lại từ file.
